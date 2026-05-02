@@ -6,9 +6,15 @@ column per ticker, in chronological order.
 Input columns (header required, order flexible):
     date      ISO 8601 (YYYY-MM-DD)
     ticker    string (normalized to upper-case)
-    type      BUY or SELL (case-insensitive)
+    type      START, BUY, or SELL (case-insensitive)
     quantity  decimal, positive
     price     per-share price, decimal, positive (CAD)
+
+A START row declares an opening balance for a ticker — `quantity` is the
+shares already held and `price` is their per-share ACB. A ticker may have
+at most one START, and it must come before any BUY/SELL for that ticker
+chronologically (the run errors clearly otherwise). Mathematically a
+START is identical to a BUY at the same per-share price.
 
 Output columns: date, ticker, type, quantity, price, acb
     `acb` is the running total ACB for that ticker AFTER the transaction,
@@ -16,7 +22,7 @@ Output columns: date, ticker, type, quantity, price, acb
 
 v1 simplifications (intentional, see plan):
   - No commissions / outlays.
-  - Only BUY and SELL (no DRIP, ROC, splits, phantom distributions).
+  - Only START, BUY, and SELL (no DRIP, ROC, splits, phantom distributions).
   - No superficial-loss rule.
   - No zero-floor handling; over-selling raises a clear ValueError.
   - Single currency (CAD); no FX.
@@ -60,10 +66,20 @@ def compute_acb(rows):
     for _, tx in ordered:
         ticker, tx_type = tx["ticker"], tx["type"]
         qty, price = tx["quantity"], tx["price"]
+
+        # A START is only valid as the first appearance of its ticker.
+        # This single check covers both ordering ("START came after a
+        # BUY/SELL") and uniqueness ("two STARTs for one ticker").
+        if tx_type == "START" and ticker in holdings:
+            raise ValueError(
+                f"START for {ticker} on {tx['date']} must precede "
+                f"other transactions for that ticker"
+            )
+
         state = holdings.setdefault(ticker, [Decimal(0), Decimal(0)])
         shares, total_acb = state
 
-        if tx_type == "BUY":
+        if tx_type in ("START", "BUY"):
             shares += qty
             total_acb += qty * price
         elif tx_type == "SELL":

@@ -126,6 +126,80 @@ def test_cli_end_to_end_on_sample_fixture(tmp_path):
     )
 
 
+def test_start_establishes_opening_balance():
+    # START 100 @ 95.00 → opening total ACB = 9500
+    rows = [tx("2023-12-31", "VFV", "START", 100, "95.00")]
+    assert acbs(rows) == [Decimal("9500.00")]
+
+
+def test_start_then_buy_averages_correctly():
+    # START 100 @ 95 → 9500, BUY 50 @ 102 → 9500+5100 = 14600
+    # per-share = 14600/150 = 97.3333...
+    rows = [
+        tx("2023-12-31", "VFV", "START", 100, "95.00"),
+        tx("2024-03-10", "VFV", "BUY", 50, "102.00"),
+    ]
+    assert acbs(rows) == [Decimal("9500.00"), Decimal("14600.00")]
+
+
+def test_start_then_sell_uses_opening_acb():
+    # START 100 @ 95 → 9500, SELL 40 @ 120 → ACB removed = 40*95 = 3800
+    # → remaining 5700; per-share still 95.
+    rows = [
+        tx("2023-12-31", "VFV", "START", 100, "95.00"),
+        tx("2024-06-20", "VFV", "SELL", 40, "120.00"),
+    ]
+    assert acbs(rows) == [Decimal("9500.00"), Decimal("5700.00")]
+
+
+def test_start_after_buy_for_same_ticker_raises():
+    rows = [
+        tx("2024-01-15", "VFV", "BUY", 100, "98.50"),
+        tx("2024-06-20", "VFV", "START", 50, "95.00"),
+    ]
+    with pytest.raises(ValueError, match="START for VFV on 2024-06-20 must precede"):
+        list(compute_acb(rows))
+
+
+def test_two_starts_for_same_ticker_raises():
+    rows = [
+        tx("2023-12-31", "VFV", "START", 100, "95.00"),
+        tx("2024-01-01", "VFV", "START", 50, "100.00"),
+    ]
+    with pytest.raises(ValueError, match="START for VFV on 2024-01-01 must precede"):
+        list(compute_acb(rows))
+
+
+def test_starts_for_different_tickers_are_independent():
+    rows = [
+        tx("2023-12-31", "VFV", "START", 100, "95.00"),
+        tx("2023-12-31", "XEQT", "START", 200, "27.50"),
+        tx("2024-03-10", "VFV", "BUY", 50, "102.00"),
+    ]
+    out = list(compute_acb(rows))
+    vfv = [r["acb"] for r in out if r["ticker"] == "VFV"]
+    xeqt = [r["acb"] for r in out if r["ticker"] == "XEQT"]
+    assert vfv == [Decimal("9500.00"), Decimal("14600.00")]
+    assert xeqt == [Decimal("5500.00")]
+
+
+def test_cli_end_to_end_on_opening_balance_fixture(tmp_path):
+    # START 100 @ 95 → 9500;  BUY 50 @ 102 → 14600 (per-share 97.3333...);
+    # SELL 75 @ 110 → ACB removed = 75 * 97.3333... = 7300 → remaining 7300.
+    out_path = tmp_path / "out.csv"
+    subprocess.run(
+        [sys.executable, str(REPO / "acb.py"),
+         str(REPO / "sample_with_opening_balance.csv"), "-o", str(out_path)],
+        check=True,
+    )
+    assert out_path.read_text() == (
+        "date,ticker,type,quantity,price,acb\n"
+        "2023-12-31,VFV,START,100,95.00,9500.00\n"
+        "2024-03-10,VFV,BUY,50,102.00,14600.00\n"
+        "2024-06-20,VFV,SELL,75,110.00,7300.00\n"
+    )
+
+
 def test_load_transactions_normalizes_case_and_types(tmp_path):
     src = tmp_path / "in.csv"
     src.write_text(

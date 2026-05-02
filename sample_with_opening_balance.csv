@@ -1,0 +1,4 @@
+date,ticker,type,quantity,price
+2023-12-31,VFV,START,100,95.00
+2024-03-10,VFV,BUY,50,102.00
+2024-06-20,VFV,SELL,75,110.00
