@@ -12,7 +12,7 @@ from acb import compute_acb, load_transactions
 REPO = Path(__file__).parent
 
 
-def tx(date, ticker, tx_type, quantity, price):
+def tx(date, ticker, tx_type, quantity, price, currency="CAD", exchange_rate="1"):
     """Build a normalized transaction dict, as load_transactions would."""
     return {
         "date": date,
@@ -20,6 +20,8 @@ def tx(date, ticker, tx_type, quantity, price):
         "type": tx_type,
         "quantity": Decimal(str(quantity)),
         "price": Decimal(str(price)),
+        "currency": currency,
+        "exchange_rate": Decimal(str(exchange_rate)),
     }
 
 
@@ -119,10 +121,10 @@ def test_cli_end_to_end_on_sample_fixture(tmp_path):
     )
     # read_text() normalizes \r\n → \n; that's fine for content equality.
     assert out_path.read_text() == (
-        "date,ticker,type,quantity,price,acb\n"
-        "2024-01-15,VFV,BUY,100,98.50,9850.00\n"
-        "2024-03-10,VFV,BUY,50,102.00,14950.00\n"
-        "2024-06-20,VFV,SELL,75,110.00,7475.00\n"
+        "date,ticker,type,quantity,price,currency,exchange_rate,price_cad,acb\n"
+        "2024-01-15,VFV,BUY,100,98.50,CAD,1,98.50,9850.00\n"
+        "2024-03-10,VFV,BUY,50,102.00,CAD,1,102.00,14950.00\n"
+        "2024-06-20,VFV,SELL,75,110.00,CAD,1,110.00,7475.00\n"
     )
 
 
@@ -193,10 +195,10 @@ def test_cli_end_to_end_on_opening_balance_fixture(tmp_path):
         check=True,
     )
     assert out_path.read_text() == (
-        "date,ticker,type,quantity,price,acb\n"
-        "2023-12-31,VFV,START,100,95.00,9500.00\n"
-        "2024-03-10,VFV,BUY,50,102.00,14600.00\n"
-        "2024-06-20,VFV,SELL,75,110.00,7300.00\n"
+        "date,ticker,type,quantity,price,currency,exchange_rate,price_cad,acb\n"
+        "2023-12-31,VFV,START,100,95.00,CAD,1,95.00,9500.00\n"
+        "2024-03-10,VFV,BUY,50,102.00,CAD,1,102.00,14600.00\n"
+        "2024-06-20,VFV,SELL,75,110.00,CAD,1,110.00,7300.00\n"
     )
 
 
@@ -211,3 +213,90 @@ def test_load_transactions_normalizes_case_and_types(tmp_path):
     assert row["type"] == "BUY"
     assert row["quantity"] == Decimal("100")
     assert row["price"] == Decimal("98.50")
+
+
+def test_load_transactions_defaults_currency_to_cad_when_columns_missing(tmp_path):
+    # No currency / exchange_rate columns at all → CAD with rate 1.
+    src = tmp_path / "in.csv"
+    src.write_text(
+        "date,ticker,type,quantity,price\n"
+        "2024-01-15,VFV,BUY,100,98.50\n"
+    )
+    [row] = load_transactions([str(src)])
+    assert row["currency"] == "CAD"
+    assert row["exchange_rate"] == Decimal("1")
+
+
+def test_load_transactions_reads_currency_and_exchange_rate(tmp_path):
+    src = tmp_path / "in.csv"
+    src.write_text(
+        "date,ticker,type,quantity,price,currency,exchange_rate\n"
+        "2025-01-02,AAPL,BUY,10,180.00,usd,1.4418\n"
+    )
+    [row] = load_transactions([str(src)])
+    assert row["currency"] == "USD"
+    assert row["exchange_rate"] == Decimal("1.4418")
+
+
+def test_non_cad_currency_without_exchange_rate_raises(tmp_path):
+    src = tmp_path / "in.csv"
+    src.write_text(
+        "date,ticker,type,quantity,price,currency,exchange_rate\n"
+        "2025-01-02,AAPL,BUY,10,180.00,USD,\n"
+    )
+    with pytest.raises(ValueError, match="non-CAD currency 'USD' requires an exchange_rate"):
+        load_transactions([str(src)])
+
+
+def test_cad_with_explicit_rate_is_treated_as_one(tmp_path):
+    # A bogus rate on a CAD row is silently forced to 1 (documented behavior).
+    src = tmp_path / "in.csv"
+    src.write_text(
+        "date,ticker,type,quantity,price,currency,exchange_rate\n"
+        "2024-01-15,VFV,BUY,100,98.50,CAD,9.99\n"
+    )
+    [row] = load_transactions([str(src)])
+    assert row["exchange_rate"] == Decimal("1")
+
+
+def test_usd_buy_uses_cad_price_for_acb():
+    # 10 AAPL @ 180 USD with rate 1.4418 → CAD ACB = 10 * 180 * 1.4418 = 2595.24
+    rows = [tx("2025-01-02", "AAPL", "BUY", 10, "180.00",
+               currency="USD", exchange_rate="1.4418")]
+    assert acbs(rows) == [Decimal("2595.24")]
+
+
+def test_mixed_currency_acb_independent_per_ticker():
+    # AAPL in USD, VFV in CAD — each ticker's running ACB is independent
+    # and both end up in CAD.
+    rows = [
+        tx("2025-01-02", "AAPL", "BUY", 10, "180.00",
+           currency="USD", exchange_rate="1.4418"),     # 2595.24
+        tx("2025-01-15", "VFV", "BUY", 100, "98.50"),   # 9850.00
+        tx("2025-02-01", "AAPL", "BUY", 5, "190.00",
+           currency="USD", exchange_rate="1.4603"),     # +1387.285 → 3982.525
+    ]
+    out = list(compute_acb(rows))
+    aapl = [r["acb"] for r in out if r["ticker"] == "AAPL"]
+    vfv = [r["acb"] for r in out if r["ticker"] == "VFV"]
+    # Second AAPL: 5 * 190 * 1.4603 = 1387.285 → total 3982.525 →
+    # banker's-rounds to 3982.52 (digit before .525 is 2, even).
+    assert aapl == [Decimal("2595.24"), Decimal("3982.52")]
+    assert vfv == [Decimal("9850.00")]
+
+
+def test_cli_end_to_end_with_currency_columns(tmp_path):
+    # Mixed-currency fixture: USD AAPL row with explicit rate, CAD VFV row
+    # leaving currency/rate blank to exercise defaults.
+    out_path = tmp_path / "out.csv"
+    subprocess.run(
+        [sys.executable, str(REPO / "acb.py"),
+         str(REPO / "sample_with_fx.csv"), "-o", str(out_path)],
+        check=True,
+    )
+    # Blank currency/exchange_rate in input get normalized to CAD/1 in output.
+    assert out_path.read_text() == (
+        "date,ticker,type,quantity,price,currency,exchange_rate,price_cad,acb\n"
+        "2025-01-02,AAPL,BUY,10,180.00,USD,1.4418,259.524000,2595.24\n"
+        "2025-01-15,VFV,BUY,100,98.50,CAD,1,98.50,9850.00\n"
+    )

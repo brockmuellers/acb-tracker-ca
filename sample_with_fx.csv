@@ -1,0 +1,3 @@
+date,ticker,type,quantity,price,currency,exchange_rate
+2025-01-02,AAPL,BUY,10,180.00,USD,1.4418
+2025-01-15,VFV,BUY,100,98.50,,

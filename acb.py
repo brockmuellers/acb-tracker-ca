@@ -4,11 +4,15 @@ Reads one or more CSVs of transactions and emits a CSV with a running ACB
 column per ticker, in chronological order.
 
 Input columns (header required, order flexible):
-    date      ISO 8601 (YYYY-MM-DD)
-    ticker    string (normalized to upper-case)
-    type      START, BUY, or SELL (case-insensitive)
-    quantity  decimal, positive
-    price     per-share price, decimal, positive (CAD)
+    date           ISO 8601 (YYYY-MM-DD)
+    ticker         string (normalized to upper-case)
+    type           START, BUY, or SELL (case-insensitive)
+    quantity       decimal, positive
+    price          per-share price in `currency`, decimal, positive
+    currency       OPTIONAL ISO 4217 code (default CAD, case-insensitive)
+    exchange_rate  OPTIONAL foreign-currency-to-CAD rate.
+                   Required for non-CAD rows; ignored on CAD rows
+                   (always treated as 1).
 
 A START row declares an opening balance for a ticker — `quantity` is the
 shares already held and `price` is their per-share ACB. A ticker may have
@@ -16,16 +20,21 @@ at most one START, and it must come before any BUY/SELL for that ticker
 chronologically (the run errors clearly otherwise). Mathematically a
 START is identical to a BUY at the same per-share price.
 
-Output columns: date, ticker, type, quantity, price, acb
+Output columns: date, ticker, type, quantity, price, currency,
+exchange_rate, price_cad, acb
+    `price_cad` is `price * exchange_rate`, the per-share price in CAD
+    used for the ACB math (raw Decimal product, not quantized).
     `acb` is the running total ACB for that ticker AFTER the transaction,
-    quantized to cents using banker's rounding.
+    always in CAD, quantized to cents using banker's rounding.
 
 v1 simplifications (intentional, see plan):
   - No commissions / outlays.
   - Only START, BUY, and SELL (no DRIP, ROC, splits, phantom distributions).
   - No superficial-loss rule.
   - No zero-floor handling; over-selling raises a clear ValueError.
-  - Single currency (CAD); no FX.
+  - ACB is always in CAD; the user supplies the per-row foreign-to-CAD
+    exchange rate. There is no FX rate file lookup, no auto-inversion of
+    pairs, and no cross-currency chaining.
   - Same-date tie-break is input file order.
 """
 
@@ -35,7 +44,11 @@ import sys
 from decimal import Decimal, ROUND_HALF_EVEN
 
 CENTS = Decimal("0.01")
-OUTPUT_COLUMNS = ["date", "ticker", "type", "quantity", "price", "acb"]
+ONE = Decimal("1")
+OUTPUT_COLUMNS = [
+    "date", "ticker", "type", "quantity", "price",
+    "currency", "exchange_rate", "price_cad", "acb",
+]
 
 
 def load_transactions(paths):
@@ -44,12 +57,27 @@ def load_transactions(paths):
     for path in paths:
         with open(path, newline="") as f:
             for row in csv.DictReader(f):
+                currency = ((row.get("currency") or "").strip().upper()
+                            or "CAD")
+                rate_raw = (row.get("exchange_rate") or "").strip()
+                if currency == "CAD":
+                    exchange_rate = ONE
+                else:
+                    if not rate_raw:
+                        raise ValueError(
+                            f"{row['ticker'].strip().upper()} on "
+                            f"{row['date'].strip()}: non-CAD currency "
+                            f"{currency!r} requires an exchange_rate"
+                        )
+                    exchange_rate = Decimal(rate_raw)
                 rows.append({
                     "date": row["date"].strip(),
                     "ticker": row["ticker"].strip().upper(),
                     "type": row["type"].strip().upper(),
                     "quantity": Decimal(row["quantity"]),
                     "price": Decimal(row["price"]),
+                    "currency": currency,
+                    "exchange_rate": exchange_rate,
                 })
     return rows
 
@@ -57,7 +85,7 @@ def load_transactions(paths):
 def compute_acb(rows):
     """Walk transactions in chronological order, yielding output dicts.
 
-    Per-ticker state is (shares, total_acb), both Decimal.
+    Per-ticker state is (shares, total_acb), both Decimal and always CAD.
     """
     holdings = {}  # ticker -> [shares, total_acb]
     # Stable sort by date; ties keep original input order.
@@ -66,6 +94,8 @@ def compute_acb(rows):
     for _, tx in ordered:
         ticker, tx_type = tx["ticker"], tx["type"]
         qty, price = tx["quantity"], tx["price"]
+        currency, rate = tx["currency"], tx["exchange_rate"]
+        price_cad = price * rate
 
         # A START is only valid as the first appearance of its ticker.
         # This single check covers both ordering ("START came after a
@@ -81,7 +111,7 @@ def compute_acb(rows):
 
         if tx_type in ("START", "BUY"):
             shares += qty
-            total_acb += qty * price
+            total_acb += qty * price_cad
         elif tx_type == "SELL":
             if qty > shares:
                 raise ValueError(
@@ -101,6 +131,9 @@ def compute_acb(rows):
             "type": tx_type,
             "quantity": qty,
             "price": price,
+            "currency": currency,
+            "exchange_rate": rate,
+            "price_cad": price_cad,
             "acb": total_acb.quantize(CENTS, rounding=ROUND_HALF_EVEN),
         }
 
