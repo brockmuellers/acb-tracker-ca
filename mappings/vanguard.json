@@ -1,0 +1,20 @@
+{
+    "column_map": {
+        "Settlement Date": "date",
+        "Symbol":          "ticker",
+        "Transaction Type": "type",
+        "Shares":          "quantity",
+        "Share Price":     "price"
+    },
+    "type_map": {
+        "Buy":          "BUY",
+        "Sell":         "SELL",
+        "Sweep in":     "BUY",
+        "Sweep out":    "SELL",
+        "Reinvestment": "BUY"
+    },
+    "skip_types": ["Dividend"],
+    "defaults": {
+        "currency": "USD"
+    }
+}

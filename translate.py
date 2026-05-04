@@ -22,6 +22,7 @@ The mapping config is a JSON file with the following schema:
             "Buy":  "BUY",
             "Sell": "SELL"
         },
+        "skip_types": ["Dividend", "Reinvestment"], // optional — broker type values to drop
         "date_format": "%m/%d/%Y", // optional — strptime format; omit if already ISO 8601
         "defaults": {              // optional — static values for missing or empty columns
             "currency": "CAD"
@@ -70,6 +71,7 @@ def translate_rows(rows, config):
     """Yield translated row dicts, one per input row."""
     column_map = config["column_map"]
     type_map = config.get("type_map", {})
+    skip_types = set(config.get("skip_types", []))
     date_format = config.get("date_format")
     defaults = config.get("defaults", {})
 
@@ -81,10 +83,16 @@ def translate_rows(rows, config):
             if broker_col in row:
                 out[acb_col] = row[broker_col]
 
-        # Clean numeric fields.
+        # Drop rows whose raw type value is in skip_types.
+        if skip_types and out.get("type") in skip_types:
+            continue
+
+        # Clean numeric fields; quantity is always positive (sign is encoded in type).
         for field in ("price", "quantity"):
             if field in out:
                 out[field] = clean_number(out[field])
+        if "quantity" in out:
+            out["quantity"] = out["quantity"].lstrip("-")
 
         # Remap type values.
         if type_map and "type" in out:

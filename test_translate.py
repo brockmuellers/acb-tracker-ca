@@ -508,6 +508,48 @@ def test_apply_fx_rates_unknown_currency_raises():
         apply_fx_rates(rows, {})
 
 
+# --- skip_types ---
+
+def test_skip_types_drops_matching_rows():
+    config = {**BASE_CONFIG, "skip_types": ["Dividend"]}
+    rows = [
+        make_row(**{"Txn Type": "BUY"}),
+        make_row(**{"Txn Type": "Dividend"}),
+        make_row(**{"Txn Type": "BUY"}),
+    ]
+    out = list(translate_rows(rows, config))
+    assert len(out) == 2
+    assert all(r["type"] == "BUY" for r in out)
+
+
+def test_skip_types_does_not_raise_for_skipped_unknown_type():
+    config = {**BASE_CONFIG, "type_map": {"BUY": "BUY"}, "skip_types": ["Dividend"]}
+    rows = [make_row(**{"Txn Type": "Dividend"})]
+    out = list(translate_rows(rows, config))
+    assert out == []
+
+
+def test_skip_types_empty_list_skips_nothing():
+    config = {**BASE_CONFIG, "skip_types": []}
+    rows = [make_row(**{"Txn Type": "BUY"})]
+    out = list(translate_rows(rows, config))
+    assert len(out) == 1
+
+
+# --- negative quantity ---
+
+def test_negative_quantity_stripped():
+    rows = [make_row(**{"Shares": "-1.6289"})]
+    out = list(translate_rows(rows, BASE_CONFIG))
+    assert out[0]["quantity"] == "1.6289"
+
+
+def test_positive_quantity_unchanged():
+    rows = [make_row(**{"Shares": "1.6289"})]
+    out = list(translate_rows(rows, BASE_CONFIG))
+    assert out[0]["quantity"] == "1.6289"
+
+
 # --- CLI --fx-dir ---
 
 def test_cli_fx_dir_populates_exchange_rate(tmp_path):
