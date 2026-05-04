@@ -7,7 +7,16 @@ from pathlib import Path
 
 import pytest
 
-from translate import clean_number, filter_by_date, load_config, translate_rows, validate_columns
+from translate import (
+    apply_fx_rates,
+    clean_number,
+    filter_by_date,
+    load_config,
+    load_fx_rates,
+    lookup_rate,
+    translate_rows,
+    validate_columns,
+)
 
 REPO = Path(__file__).parent
 
@@ -406,4 +415,135 @@ def test_cli_output_pipes_into_acb(tmp_path):
         "2024-01-15,VFV,BUY,100,98.50,CAD,1,98.50,9850.00\n"
         "2024-03-10,VFV,BUY,50,102.00,CAD,1,102.00,14950.00\n"
         "2024-06-20,VFV,SELL,75,110.00,CAD,1,110.00,7475.00\n"
+    )
+
+
+# --- load_fx_rates ---
+
+def _write_fx_csv(path, col, rows):
+    """Helper: write a minimal BoC-style FX CSV."""
+    path.write_text(f"date,{col}\n" + "".join(f"{d},{r}\n" for d, r in rows))
+
+
+def test_load_fx_rates_single_file(tmp_path):
+    _write_fx_csv(tmp_path / "usd.csv", "FXUSDCAD", [
+        ("2025-01-02", "1.4418"),
+        ("2025-01-03", "1.4442"),
+    ])
+    rates = load_fx_rates(tmp_path)
+    assert rates["USD"]["2025-01-02"] == "1.4418"
+    assert rates["USD"]["2025-01-03"] == "1.4442"
+
+
+def test_load_fx_rates_merges_two_files_same_currency(tmp_path):
+    _write_fx_csv(tmp_path / "usd_2024.csv", "FXUSDCAD", [("2024-12-31", "1.4400")])
+    _write_fx_csv(tmp_path / "usd_2025.csv", "FXUSDCAD", [("2025-01-02", "1.4418")])
+    rates = load_fx_rates(tmp_path)
+    assert "2024-12-31" in rates["USD"]
+    assert "2025-01-02" in rates["USD"]
+
+
+def test_load_fx_rates_invalid_file_raises(tmp_path):
+    (tmp_path / "bad.csv").write_text("date,price\n2025-01-02,98.50\n")
+    with pytest.raises(ValueError, match="no Bank of Canada FX column"):
+        load_fx_rates(tmp_path)
+
+
+# --- lookup_rate ---
+
+RATE_DATA = {
+    "2025-01-02": "1.4418",
+    "2025-01-03": "1.4442",
+    "2025-01-06": "1.4348",  # Monday (gap: Sat/Sun 4th/5th absent)
+}
+
+
+def test_lookup_rate_exact_match():
+    assert lookup_rate(RATE_DATA, "USD", "2025-01-03") == "1.4442"
+
+
+def test_lookup_rate_falls_back_to_previous_date():
+    # 2025-01-04 is Saturday — should fall back to Friday 2025-01-03
+    assert lookup_rate(RATE_DATA, "USD", "2025-01-04") == "1.4442"
+
+
+def test_lookup_rate_date_after_max_raises():
+    with pytest.raises(ValueError, match="latest available is 2025-01-06"):
+        lookup_rate(RATE_DATA, "USD", "2025-06-01")
+
+
+def test_lookup_rate_date_before_min_raises():
+    with pytest.raises(ValueError, match="earliest available is 2025-01-02"):
+        lookup_rate(RATE_DATA, "USD", "2024-12-31")
+
+
+# --- apply_fx_rates ---
+
+def test_apply_fx_rates_fills_non_cad_row():
+    rows = [{"date": "2025-01-03", "currency": "USD", "ticker": "AAPL", "type": "BUY",
+              "quantity": "10", "price": "180.00"}]
+    fx = {"USD": {"2025-01-03": "1.4442"}}
+    out = apply_fx_rates(rows, fx)
+    assert out[0]["exchange_rate"] == "1.4442"
+
+
+def test_apply_fx_rates_skips_cad_row():
+    rows = [{"date": "2025-01-03", "currency": "CAD", "ticker": "VFV", "type": "BUY",
+              "quantity": "10", "price": "98.50"}]
+    out = apply_fx_rates(rows, {})
+    assert "exchange_rate" not in out[0]
+
+
+def test_apply_fx_rates_skips_row_with_existing_rate():
+    rows = [{"date": "2025-01-03", "currency": "USD", "ticker": "AAPL", "type": "BUY",
+              "quantity": "10", "price": "180.00", "exchange_rate": "1.50"}]
+    out = apply_fx_rates(rows, {"USD": {"2025-01-03": "1.4442"}})
+    assert out[0]["exchange_rate"] == "1.50"
+
+
+def test_apply_fx_rates_unknown_currency_raises():
+    rows = [{"date": "2025-01-03", "currency": "EUR", "ticker": "X", "type": "BUY",
+              "quantity": "1", "price": "10.00"}]
+    with pytest.raises(ValueError, match="no FX rate data for 'EUR'"):
+        apply_fx_rates(rows, {})
+
+
+# --- CLI --fx-dir ---
+
+def test_cli_fx_dir_populates_exchange_rate(tmp_path):
+    src = tmp_path / "broker.csv"
+    src.write_text(
+        "Trade Date,Symbol,Txn Type,Shares,Price ($),Currency\n"
+        "2025-01-03,AAPL,BUY,10,180.00,USD\n"
+        "2025-01-06,VFV,BUY,100,98.50,CAD\n"
+    )
+    config = {
+        "column_map": {
+            "Trade Date": "date",
+            "Symbol": "ticker",
+            "Txn Type": "type",
+            "Shares": "quantity",
+            "Price ($)": "price",
+            "Currency": "currency",
+        }
+    }
+    cfg = tmp_path / "map.json"
+    cfg.write_text(json.dumps(config))
+    fx_dir = tmp_path / "fx"
+    fx_dir.mkdir()
+    _write_fx_csv(fx_dir / "usd.csv", "FXUSDCAD", [
+        ("2025-01-02", "1.4418"),
+        ("2025-01-03", "1.4442"),
+        ("2025-01-06", "1.4348"),
+    ])
+    out = tmp_path / "out.csv"
+    subprocess.run(
+        [sys.executable, str(REPO / "translate.py"), str(src), str(cfg),
+         "-o", str(out), "--fx-dir", str(fx_dir)],
+        check=True,
+    )
+    assert out.read_text() == (
+        "date,ticker,type,quantity,price,currency,exchange_rate\n"
+        "2025-01-03,AAPL,BUY,10,180.00,USD,1.4442\n"
+        "2025-01-06,VFV,BUY,100,98.50,CAD,\n"
     )

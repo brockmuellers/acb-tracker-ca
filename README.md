@@ -37,10 +37,42 @@ ticker.
 - `acb` is the running ACB **in CAD** after the transaction, quantized
   to cents using banker's rounding
 
+## Translating brokerage exports
+
+Most brokerage CSV exports use different column names and value formats than `acb.py` expects.
+`translate.py` bridges that gap using a JSON mapping config:
+
+```
+python3 translate.py <broker_export.csv> <mapping.json> [-o output.csv]
+                     [--start YYYY-MM-DD] [--end YYYY-MM-DD]
+                     [--fx-dir DIR]
+```
+
+A ready-to-use mapping for Wealthsimple Trade is in `mappings/wealthsimple.json`.
+
+### Automatic exchange rates (`--fx-dir`)
+
+For non-CAD transactions, `acb.py` requires an `exchange_rate` column. `translate.py` can look
+this up automatically from Bank of Canada daily FX rate files.
+
+1. Go to <https://www.bankofcanada.ca/rates/exchange/daily-exchange-rates-lookup/>
+2. Select the currency pair (e.g. USD/CAD), choose your date range, and download the CSV
+3. Save the file to a directory (e.g. `fx_rates/`); repeat for other currencies or date ranges
+4. Pass the directory when translating:
+   ```
+   python3 translate.py broker.csv mappings/wealthsimple.json --fx-dir fx_rates/
+   ```
+
+Notes:
+- Bank of Canada files cover business days only; weekends and holidays automatically fall back
+  to the previous available rate
+- Multiple files for the same currency (e.g. different years) are merged automatically
+- Every CSV in the directory is expected to be a Bank of Canada FX file
+
 ## Tests
 
 ```
-python3 -m pytest test_acb.py -v
+python3 -m pytest test_acb.py test_translate.py -v
 ```
 
 ## v1 simplifications
