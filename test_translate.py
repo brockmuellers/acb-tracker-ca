@@ -536,6 +536,42 @@ def test_skip_types_empty_list_skips_nothing():
     assert len(out) == 1
 
 
+# --- zero quantity/price validation ---
+
+def test_zero_quantity_raises():
+    rows = [make_row(**{"Shares": "0"})]
+    with pytest.raises(ValueError, match="quantity is 0"):
+        list(translate_rows(rows, BASE_CONFIG))
+
+
+def test_zero_price_raises():
+    rows = [make_row(**{"Price ($)": "0"})]
+    with pytest.raises(ValueError, match="price is 0"):
+        list(translate_rows(rows, BASE_CONFIG))
+
+
+def test_nonzero_quantity_and_price_do_not_raise():
+    rows = [make_row()]
+    out = list(translate_rows(rows, BASE_CONFIG))
+    assert len(out) == 1
+
+
+def test_zero_validation_fires_after_sweep_override():
+    """A sweep row with price_override must not raise even if mapped price column is 0."""
+    config = {
+        **BASE_CONFIG,
+        "sweep_types": {
+            "types": ["Sweep in"],
+            "quantity_col": "Net Amount",
+            "price_override": "1.0",
+        },
+    }
+    row = make_sweep_row()  # Price ($)=0, Net Amount=-53.03
+    out = list(translate_rows([row], config))
+    assert out[0]["price"] == "1.0"
+    assert out[0]["quantity"] == "53.03"
+
+
 # --- negative quantity ---
 
 def test_negative_quantity_stripped():

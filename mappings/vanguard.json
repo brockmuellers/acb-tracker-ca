@@ -18,7 +18,7 @@
         "currency": "USD"
     },
     "sweep_types": {
-        "types":          ["Sweep in", "Sweep out"],
+        "types":          ["Sweep in", "Sweep out", "Reinvestment"],
         "quantity_col":   "Net Amount",
         "price_override": "1.0"
     }

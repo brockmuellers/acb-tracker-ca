@@ -133,6 +133,21 @@ def translate_rows(rows, config):
             if not out.get(col):
                 out[col] = val
 
+        # Validate that quantity and price are non-zero after all transformations.
+        # This is the primary safeguard against column mapping mis-configurations (e.g. a broker
+        # that stores quantity in a non-standard column silently producing 0-share rows).
+        loc = f"{out.get('ticker', '?')} on {out.get('date', '?')}"
+        for field in ("quantity", "price"):
+            if field in out:
+                try:
+                    val = float(out[field])
+                except (ValueError, TypeError):
+                    raise ValueError(f"{loc}: {field} {out[field]!r} is not a valid number")
+                if val == 0:
+                    raise ValueError(
+                        f"{loc}: {field} is 0 — check your column_map or sweep_types config"
+                    )
+
         yield out
 
 
