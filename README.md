@@ -50,6 +50,11 @@ python3 translate.py <broker_export.csv> <mapping.json> [-o output.csv]
 
 A ready-to-use mapping for Wealthsimple Trade is in `mappings/wealthsimple.json`.
 
+**Note:** some brokerage exports include a summary block above the actual transaction table
+(e.g. Vanguard prepends a portfolio holdings section before the trade history). If the first
+row of your CSV is not the correct column header, delete the extra rows manually before running
+`translate.py`.
+
 ### Automatic exchange rates (`--fx-dir`)
 
 For non-CAD transactions, `acb.py` requires an `exchange_rate` column. `translate.py` can look
@@ -62,6 +67,10 @@ this up automatically from Bank of Canada daily FX rate files.
    ```
    python3 translate.py broker.csv mappings/wealthsimple.json --fx-dir fx_rates/
    ```
+
+**Note:** some Bank of Canada download pages include introductory rows above the data header.
+If the downloaded CSV does not start with `date,FX...`, delete the extra rows manually before
+placing the file in your `--fx-dir` directory.
 
 Notes:
 - Bank of Canada files cover business days only; weekends and holidays automatically fall back
