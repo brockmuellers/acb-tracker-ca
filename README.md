@@ -3,6 +3,10 @@
 A small Python script that computes the running Adjusted Cost Base (ACB)
 for Canadian CRA tax reporting from a CSV of transactions.
 
+### Disclaimer
+
+This tool does not constitute professional tax advice. Use at your own risk.
+
 ## Usage
 
 ```
@@ -78,6 +82,32 @@ Notes:
 - Multiple files for the same currency (e.g. different years) are merged automatically
 - Every CSV in the directory is expected to be a Bank of Canada FX file
 
+### Sweep funds (`sweep_funds`)
+
+Some brokers (e.g. Vanguard) store quantity and price in non-standard columns for automatic
+sweep fund transactions. For example, Vanguard's VMFXX sweep rows always show `Shares=0` and
+`Share Price=0` for reinvestments — the actual dollar amount is in `Net Amount`.
+
+Use `sweep_funds` in the mapping config to redirect quantity and/or price for specific tickers:
+
+```json
+"sweep_funds": {
+    "VMFXX": {
+        "quantity_col":   "Net Amount",
+        "price_override": "1.0"
+    }
+}
+```
+
+- `quantity_col` — broker column name to use as quantity instead of the mapped column (sign is stripped; absolute value is used)
+- `price_override` — literal string to use as price (omit if the mapped price column is already correct)
+
+A ready-to-use Vanguard mapping including this config is in `mappings/vanguard.json`.
+
+### Dates
+
+If a brokerage export includes both "transaction date" and "settlement date", use "settlement date".
+
 ## Tests
 
 ```
@@ -94,3 +124,4 @@ python3 -m pytest test_acb.py test_translate.py -v
   exchange rate. No FX rate file lookup, auto-inversion, or cross-currency
   chaining.
 - Same-date tie-break is input file order.
+- No explicit tracking or verification of current holdings by account.

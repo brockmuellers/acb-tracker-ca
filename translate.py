@@ -26,6 +26,12 @@ The mapping config is a JSON file with the following schema:
         "date_format": "%m/%d/%Y", // optional — strptime format; omit if already ISO 8601
         "defaults": {              // optional — static values for missing or empty columns
             "currency": "CAD"
+        },
+        "sweep_funds": {           // optional — tickers whose quantity/price live in alternate columns
+            "VMFXX": {
+                "quantity_col":   "Net Amount",  // broker column to read quantity from (sign stripped)
+                "price_override": "1.0"          // literal price string (omit to use mapped price column)
+            }
         }
     }
 
@@ -74,6 +80,7 @@ def translate_rows(rows, config):
     skip_types = set(config.get("skip_types", []))
     date_format = config.get("date_format")
     defaults = config.get("defaults", {})
+    sweep_funds = config.get("sweep_funds", {})
 
     for row in rows:
         out = {}
@@ -93,6 +100,21 @@ def translate_rows(rows, config):
                 out[field] = clean_number(out[field])
         if "quantity" in out:
             out["quantity"] = out["quantity"].lstrip("-")
+
+        # Sweep fund override: some brokers store quantity/price in alternate columns for
+        # money-market sweep transactions (e.g. Vanguard puts dollar amount in Net Amount).
+        ticker = (out.get("ticker") or "").strip()
+        if ticker in sweep_funds:
+            sf = sweep_funds[ticker]
+            if "quantity_col" in sf:
+                col = sf["quantity_col"]
+                if col not in row:
+                    raise ValueError(
+                        f"sweep_funds quantity_col {col!r} not found in row for {ticker}"
+                    )
+                out["quantity"] = clean_number(row[col]).lstrip("-")
+            if "price_override" in sf:
+                out["price"] = sf["price_override"]
 
         # Remap type values.
         if type_map and "type" in out:

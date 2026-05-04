@@ -13,8 +13,14 @@
         "Sweep out":    "SELL",
         "Reinvestment": "BUY"
     },
-    "skip_types": ["Dividend"],
+    "skip_types": ["Dividend", "Advisor fee", "Withdrawal"],
     "defaults": {
         "currency": "USD"
+    },
+    "sweep_funds": {
+        "VMFXX": {
+            "quantity_col":   "Net Amount",
+            "price_override": "1.0"
+        }
     }
 }
