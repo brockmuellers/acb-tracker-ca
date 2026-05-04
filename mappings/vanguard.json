@@ -17,10 +17,9 @@
     "defaults": {
         "currency": "USD"
     },
-    "sweep_funds": {
-        "VMFXX": {
-            "quantity_col":   "Net Amount",
-            "price_override": "1.0"
-        }
+    "sweep_types": {
+        "types":          ["Sweep in", "Sweep out"],
+        "quantity_col":   "Net Amount",
+        "price_override": "1.0"
     }
 }

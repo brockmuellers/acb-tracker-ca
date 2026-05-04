@@ -591,15 +591,14 @@ def test_cli_fx_dir_populates_exchange_rate(tmp_path):
     )
 
 
-# --- sweep_funds ---
+# --- sweep_types ---
 
 SWEEP_CONFIG = {
     **BASE_CONFIG,
-    "sweep_funds": {
-        "VMFXX": {
-            "quantity_col": "Net Amount",
-            "price_override": "1.0",
-        }
+    "sweep_types": {
+        "types": ["Sweep in", "Sweep out"],
+        "quantity_col": "Net Amount",
+        "price_override": "1.0",
     },
 }
 
@@ -608,7 +607,7 @@ def make_sweep_row(**kwargs):
     return {
         "Trade Date": "2025-01-02",
         "Symbol": "VMFXX",
-        "Txn Type": "BUY",
+        "Txn Type": "Sweep in",
         "Shares": "0",
         "Price ($)": "0",
         "Net Amount": "-53.03",
@@ -616,47 +615,46 @@ def make_sweep_row(**kwargs):
     }
 
 
-def test_sweep_fund_quantity_taken_from_alternate_col():
+def test_sweep_type_quantity_taken_from_alternate_col():
     out = list(translate_rows([make_sweep_row()], SWEEP_CONFIG))
     assert out[0]["quantity"] == "53.03"
 
 
-def test_sweep_fund_price_override_applied():
+def test_sweep_type_price_override_applied():
     out = list(translate_rows([make_sweep_row()], SWEEP_CONFIG))
     assert out[0]["price"] == "1.0"
 
 
-def test_sweep_fund_reinvestment_price_zero_overridden():
-    """Reinvestment rows have Share Price=0; price_override must fix them."""
+def test_sweep_type_price_zero_overridden():
+    """Rows with Price=0 get corrected by price_override."""
     out = list(translate_rows([make_sweep_row(**{"Price ($)": "0", "Net Amount": "-0.01"})], SWEEP_CONFIG))
     assert out[0]["price"] == "1.0"
     assert out[0]["quantity"] == "0.01"
 
 
-def test_sweep_fund_negative_net_amount_sign_stripped():
+def test_sweep_type_negative_net_amount_sign_stripped():
     out = list(translate_rows([make_sweep_row(**{"Net Amount": "-198.38"})], SWEEP_CONFIG))
     assert out[0]["quantity"] == "198.38"
 
 
-def test_sweep_fund_positive_net_amount_unchanged():
-    out = list(translate_rows([make_sweep_row(**{"Net Amount": "53.32"})], SWEEP_CONFIG))
+def test_sweep_type_positive_net_amount_unchanged():
+    out = list(translate_rows([make_sweep_row(**{"Txn Type": "Sweep out", "Net Amount": "53.32"})], SWEEP_CONFIG))
     assert out[0]["quantity"] == "53.32"
 
 
-def test_sweep_fund_non_sweep_ticker_unaffected():
-    """A regular ticker in the same config must not get the sweep override."""
+def test_sweep_type_non_sweep_transaction_unaffected():
+    """A regular BUY row must not get the sweep override."""
     row = make_row(**{"Shares": "10", "Price ($)": "290.79"})
     row["Net Amount"] = "-290.79"
-    config = {**SWEEP_CONFIG}
-    out = list(translate_rows([row], config))
+    out = list(translate_rows([row], SWEEP_CONFIG))
     assert out[0]["quantity"] == "10"
     assert out[0]["price"] == "290.79"
 
 
-def test_sweep_fund_missing_quantity_col_raises():
+def test_sweep_type_missing_quantity_col_raises():
     config = {
         **BASE_CONFIG,
-        "sweep_funds": {"VMFXX": {"quantity_col": "Nonexistent Column"}},
+        "sweep_types": {"types": ["Sweep in"], "quantity_col": "Nonexistent Column"},
     }
     with pytest.raises(ValueError, match="quantity_col"):
         list(translate_rows([make_sweep_row()], config))

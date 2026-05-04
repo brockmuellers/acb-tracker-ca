@@ -27,11 +27,10 @@ The mapping config is a JSON file with the following schema:
         "defaults": {              // optional — static values for missing or empty columns
             "currency": "CAD"
         },
-        "sweep_funds": {           // optional — tickers whose quantity/price live in alternate columns
-            "VMFXX": {
-                "quantity_col":   "Net Amount",  // broker column to read quantity from (sign stripped)
-                "price_override": "1.0"          // literal price string (omit to use mapped price column)
-            }
+        "sweep_types": {           // optional — broker transaction types whose quantity/price live in alternate columns
+            "types":          ["Sweep in", "Sweep out"],
+            "quantity_col":   "Net Amount",  // broker column to read quantity from (sign stripped)
+            "price_override": "1.0"          // literal price string (omit to use mapped price column)
         }
     }
 
@@ -80,7 +79,8 @@ def translate_rows(rows, config):
     skip_types = set(config.get("skip_types", []))
     date_format = config.get("date_format")
     defaults = config.get("defaults", {})
-    sweep_funds = config.get("sweep_funds", {})
+    sweep_types_config = config.get("sweep_types", {})
+    sweep_type_set = set(sweep_types_config.get("types", []))
 
     for row in rows:
         out = {}
@@ -101,20 +101,19 @@ def translate_rows(rows, config):
         if "quantity" in out:
             out["quantity"] = out["quantity"].lstrip("-")
 
-        # Sweep fund override: some brokers store quantity/price in alternate columns for
-        # money-market sweep transactions (e.g. Vanguard puts dollar amount in Net Amount).
-        ticker = (out.get("ticker") or "").strip()
-        if ticker in sweep_funds:
-            sf = sweep_funds[ticker]
-            if "quantity_col" in sf:
-                col = sf["quantity_col"]
+        # Sweep type override: some brokers store quantity/price in alternate columns for
+        # sweep transaction types (e.g. Vanguard puts dollar amount in Net Amount for sweeps).
+        # Checked against the raw broker type value, before type_map remapping.
+        if sweep_type_set and out.get("type") in sweep_type_set:
+            if "quantity_col" in sweep_types_config:
+                col = sweep_types_config["quantity_col"]
                 if col not in row:
                     raise ValueError(
-                        f"sweep_funds quantity_col {col!r} not found in row for {ticker}"
+                        f"sweep_types quantity_col {col!r} not found in row"
                     )
                 out["quantity"] = clean_number(row[col]).lstrip("-")
-            if "price_override" in sf:
-                out["price"] = sf["price_override"]
+            if "price_override" in sweep_types_config:
+                out["price"] = sweep_types_config["price_override"]
 
         # Remap type values.
         if type_map and "type" in out:

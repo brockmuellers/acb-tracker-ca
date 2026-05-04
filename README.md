@@ -82,23 +82,24 @@ Notes:
 - Multiple files for the same currency (e.g. different years) are merged automatically
 - Every CSV in the directory is expected to be a Bank of Canada FX file
 
-### Sweep funds (`sweep_funds`)
+### Sweep transaction types (`sweep_types`)
 
-Some brokers (e.g. Vanguard) store quantity and price in non-standard columns for automatic
-sweep fund transactions. For example, Vanguard's VMFXX sweep rows always show `Shares=0` and
-`Share Price=0` for reinvestments — the actual dollar amount is in `Net Amount`.
+Some brokers (e.g. Vanguard) store quantity and price in non-standard columns for sweep
+transaction types. For example, Vanguard's "Sweep in" and "Sweep out" rows always show
+`Shares=0` — the actual dollar amount is in `Net Amount`.
 
-Use `sweep_funds` in the mapping config to redirect quantity and/or price for specific tickers:
+Use `sweep_types` in the mapping config to redirect quantity and/or price for a set of
+broker transaction type values:
 
 ```json
-"sweep_funds": {
-    "VMFXX": {
-        "quantity_col":   "Net Amount",
-        "price_override": "1.0"
-    }
+"sweep_types": {
+    "types":          ["Sweep in", "Sweep out"],
+    "quantity_col":   "Net Amount",
+    "price_override": "1.0"
 }
 ```
 
+- `types` — list of raw broker transaction type values that need alternate column handling
 - `quantity_col` — broker column name to use as quantity instead of the mapped column (sign is stripped; absolute value is used)
 - `price_override` — literal string to use as price (omit if the mapped price column is already correct)
 
