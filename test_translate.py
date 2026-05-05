@@ -15,6 +15,7 @@ from translate import (
     load_fx_rates,
     lookup_rate,
     translate_rows,
+    validate_column_map,
     validate_columns,
 )
 
@@ -694,3 +695,77 @@ def test_sweep_type_missing_quantity_col_raises():
     }
     with pytest.raises(ValueError, match="quantity_col"):
         list(translate_rows([make_sweep_row()], config))
+
+
+# --- validate_column_map ---
+
+CSV_HEADERS = ["Trade Date", "Symbol", "Txn Type", "Shares", "Price ($)", "Net Amount"]
+
+
+def test_validate_column_map_passes_when_all_present():
+    validate_column_map(BASE_CONFIG["column_map"], CSV_HEADERS)
+
+
+def test_validate_column_map_raises_for_missing_column():
+    column_map = {**BASE_CONFIG["column_map"], "Nonexistent Col": "currency"}
+    with pytest.raises(ValueError, match="Nonexistent Col"):
+        validate_column_map(column_map, CSV_HEADERS, config_path="test.json")
+
+
+def test_validate_column_map_error_lists_available_columns():
+    column_map = {**BASE_CONFIG["column_map"], "Typo Col": "currency"}
+    with pytest.raises(ValueError, match="Available columns"):
+        validate_column_map(column_map, CSV_HEADERS, config_path="test.json")
+
+
+def test_validate_column_map_raises_for_missing_sweep_quantity_col():
+    with pytest.raises(ValueError, match="Missing Col.*sweep_types"):
+        validate_column_map(
+            BASE_CONFIG["column_map"],
+            CSV_HEADERS,
+            config_path="test.json",
+            sweep_quantity_col="Missing Col",
+        )
+
+
+def test_validate_column_map_passes_when_sweep_quantity_col_present():
+    validate_column_map(
+        BASE_CONFIG["column_map"],
+        CSV_HEADERS,
+        sweep_quantity_col="Net Amount",
+    )
+
+
+# --- improved error context (row numbers, column names) ---
+
+def test_unknown_type_error_includes_row_number():
+    config = {**BASE_CONFIG, "type_map": {"Buy": "BUY", "Sell": "SELL"}}
+    rows = [make_row(**{"Txn Type": "Buy"}), make_row(**{"Txn Type": "Dividend"})]
+    with pytest.raises(ValueError, match=r"row 3"):
+        list(translate_rows(rows, config))
+
+
+def test_date_parse_error_includes_row_number_and_value():
+    config = {**BASE_CONFIG, "date_format": "%m/%d/%Y"}
+    rows = [make_row(**{"Trade Date": "2024-01-15"})]
+    with pytest.raises(ValueError, match=r"row 2.*2024-01-15.*%m/%d/%Y"):
+        list(translate_rows(rows, config))
+
+
+def test_date_parse_error_includes_ticker():
+    config = {**BASE_CONFIG, "date_format": "%m/%d/%Y"}
+    rows = [make_row(**{"Trade Date": "2024-01-15", "Symbol": "AAPL"})]
+    with pytest.raises(ValueError, match="AAPL"):
+        list(translate_rows(rows, config))
+
+
+def test_blank_type_raises_clear_error():
+    rows = [make_row(**{"Txn Type": ""})]
+    with pytest.raises(ValueError, match="row 2.*'type' column is blank"):
+        list(translate_rows(rows, BASE_CONFIG))
+
+
+def test_zero_quantity_error_includes_row_number():
+    rows = [make_row(**{"Shares": "0"})]
+    with pytest.raises(ValueError, match=r"row 2"):
+        list(translate_rows(rows, BASE_CONFIG))

@@ -27,7 +27,7 @@ The mapping config is a JSON file with the following schema:
         "defaults": {              // optional — static values for missing or empty columns
             "currency": "CAD"
         },
-        "sweep_types": {           // optional — broker transaction types whose quantity/price live in alternate columns
+        "sweep_types": {           // optional — broker sweep fund transaction types whose quantity/price live in alternate columns
             "types":          ["Sweep in", "Sweep out"],
             "quantity_col":   "Net Amount",  // broker column to read quantity from (sign stripped)
             "price_override": "1.0"          // literal price string (omit to use mapped price column)
@@ -67,6 +67,19 @@ def load_config(config_path):
     return config
 
 
+def validate_column_map(column_map, csv_headers, config_path="config", sweep_quantity_col=None):
+    """Raise if any column_map key (or sweep_types.quantity_col) is absent from the CSV headers."""
+    csv_col_set = set(csv_headers)
+    missing = [k for k in column_map if k not in csv_col_set]
+    if sweep_quantity_col and sweep_quantity_col not in csv_col_set:
+        missing.append(f"{sweep_quantity_col} (sweep_types.quantity_col)")
+    if missing:
+        raise ValueError(
+            f"{config_path}: columns not found in CSV: {missing}\n"
+            f"Available columns: {sorted(csv_col_set)}"
+        )
+
+
 def clean_number(s):
     """Strip $, commas, and whitespace from a numeric string, preserving leading minus sign."""
     s = s.strip().replace(",", "").replace("$", "")
@@ -83,13 +96,20 @@ def translate_rows(rows, config):
     sweep_types_config = config.get("sweep_types", {})
     sweep_type_set = set(sweep_types_config.get("types", []))
 
-    for row in rows:
+    # start=2: DictReader consumed row 1 as the header, so first data row is spreadsheet row 2
+    for row_num, row in enumerate(rows, start=2):
         out = {}
 
         # Rename columns; drop anything not in column_map.
         for broker_col, acb_col in column_map.items():
             if broker_col in row:
                 out[acb_col] = row[broker_col]
+
+        # Raise early if the type column is present but blank.
+        if "type" in out and not out["type"].strip():
+            raise ValueError(
+                f"row {row_num}: 'type' column is blank — check the column mapped to 'type' in column_map"
+            )
 
         # Drop rows whose raw type value is in skip_types.
         if skip_types and out.get("type") in skip_types:
@@ -110,7 +130,7 @@ def translate_rows(rows, config):
                 col = sweep_types_config["quantity_col"]
                 if col not in row:
                     raise ValueError(
-                        f"sweep_types quantity_col {col!r} not found in row"
+                        f"row {row_num}: sweep_types quantity_col {col!r} not found in row"
                     )
                 out["quantity"] = clean_number(row[col]).lstrip("-")
             if "price_override" in sweep_types_config:
@@ -121,13 +141,20 @@ def translate_rows(rows, config):
             raw = out["type"]
             if raw not in type_map:
                 raise ValueError(
-                    f"unknown type value {raw!r} — add it to type_map in your mapping config"
+                    f"row {row_num}: unknown type value {raw!r} — add it to type_map in your mapping config"
                 )
             out["type"] = type_map[raw]
 
         # Convert date format to ISO 8601.
         if date_format and "date" in out:
-            out["date"] = datetime.strptime(out["date"], date_format).strftime("%Y-%m-%d")
+            raw_date = out["date"]
+            try:
+                out["date"] = datetime.strptime(raw_date, date_format).strftime("%Y-%m-%d")
+            except ValueError:
+                raise ValueError(
+                    f"row {row_num} ({out.get('ticker', '?')}): date {raw_date!r} does not match "
+                    f"format {date_format!r} (hint: use %Y for 4-digit year, %y for 2-digit)"
+                )
 
         # Fill defaults for missing or empty columns.
         for col, val in defaults.items():
@@ -137,7 +164,7 @@ def translate_rows(rows, config):
         # Validate that quantity and price are non-zero after all transformations.
         # This is the primary safeguard against column mapping mis-configurations (e.g. a broker
         # that stores quantity in a non-standard column silently producing 0-share rows).
-        loc = f"{out.get('ticker', '?')} on {out.get('date', '?')}"
+        loc = f"row {row_num} ({out.get('ticker', '?')} on {out.get('date', '?')})"
         for field in ("quantity", "price"):
             if field in out:
                 try:
@@ -258,6 +285,15 @@ def main():
 
     with open(args.input_csv, newline="") as f:
         raw_rows = list(csv.DictReader(f))
+
+    if raw_rows:
+        sweep_quantity_col = config.get("sweep_types", {}).get("quantity_col")
+        validate_column_map(
+            config["column_map"],
+            raw_rows[0].keys(),
+            config_path=args.mapping_config,
+            sweep_quantity_col=sweep_quantity_col,
+        )
 
     translated = validate_columns(translate_rows(raw_rows, config))
     translated = filter_by_date(translated, args.start, args.end)

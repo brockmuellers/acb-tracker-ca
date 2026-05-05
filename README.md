@@ -52,7 +52,7 @@ python3 translate.py <broker_export.csv> <mapping.json> [-o output.csv]
                      [--fx-dir DIR]
 ```
 
-A ready-to-use mapping for Wealthsimple Trade is in `mappings/wealthsimple.json`.
+Ready-to-use mappings can be found in `mappings/`.
 
 **Note:** some brokerage exports include a summary block above the actual transaction table
 (e.g. Vanguard prepends a portfolio holdings section before the trade history). If the first
@@ -72,7 +72,7 @@ this up automatically from Bank of Canada daily FX rate files.
    python3 translate.py broker.csv mappings/wealthsimple.json --fx-dir fx_rates/
    ```
 
-**Note:** some Bank of Canada download pages include introductory rows above the data header.
+**Note:** Bank of Canada downloads may include introductory rows above the data header.
 If the downloaded CSV does not start with `date,FX...`, delete the extra rows manually before
 placing the file in your `--fx-dir` directory.
 
@@ -126,3 +126,6 @@ python3 -m pytest test_acb.py test_translate.py -v
   chaining.
 - Same-date tie-break is input file order.
 - No explicit tracking or verification of current holdings by account.
+- Transaction notes / comments.
+- Row de-duplication.
+- ETF conversion (must be treated as BUY/SELL with manually calculated amounts that correctly transfer cost basis.)
