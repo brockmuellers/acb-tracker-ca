@@ -51,9 +51,9 @@ import csv
 import json
 import re
 import sys
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TypedDict
 
 ACB_INPUT_COLUMNS = ["date", "ticker", "type", "quantity", "price", "currency", "exchange_rate"]
 REQUIRED_COLUMNS = ["date", "ticker", "type", "quantity", "price"]
@@ -63,97 +63,132 @@ _VALID_CONFIG_KEYS = frozenset({"column_map", "type_map", "skip_types", "date_fo
 _VALID_SWEEP_KEYS = frozenset({"types", "quantity_col", "price_override"})
 
 
-class _SweepTypesRequired(TypedDict):
-    types: list[str]
+class ConfigurationError(ValueError):
+    """Raised when the JSON mapping config is invalid."""
 
 
-class SweepTypesConfig(_SweepTypesRequired, total=False):
-    quantity_col: str
-    price_override: str
+class TranslationError(ValueError):
+    """Raised when a CSV row fails to translate."""
 
 
-class _MappingConfigRequired(TypedDict):
-    column_map: dict[str, str]
+class FXRateError(ValueError):
+    """Raised when an exchange rate cannot be found or loaded."""
 
 
-class MappingConfig(_MappingConfigRequired, total=False):
-    type_map: dict[str, str]
-    skip_types: list[str]
-    date_format: str
-    defaults: dict[str, str]
-    sweep_types: SweepTypesConfig
+@dataclass
+class SweepConfig:
+    types: set[str]
+    quantity_col: str | None = None
+    price_override: str | None = None
 
-
-def validate_config(data: dict, config_path: str = "config") -> MappingConfig:
-    """Validate a raw config dict; raise ValueError with the field name for any problem found."""
-    p = config_path
-
-    unknown = sorted(set(data) - _VALID_CONFIG_KEYS)
-    if unknown:
-        raise ValueError(
-            f"{p}: unknown key(s) {unknown}\n"
-            f"Valid keys: {sorted(_VALID_CONFIG_KEYS)}"
-        )
-
-    cm = data.get("column_map")
-    if not cm or not isinstance(cm, dict):
-        raise ValueError(f"{p}: 'column_map' must be a non-empty dict mapping broker column names to ACB column names")
-    for k, v in cm.items():
-        if not isinstance(k, str) or not isinstance(v, str):
-            raise ValueError(f"{p}: 'column_map' keys and values must be strings (got {k!r}: {v!r})")
-
-    if "type_map" in data:
-        tm = data["type_map"]
-        if not isinstance(tm, dict):
-            raise ValueError(f"{p}: 'type_map' must be a dict (got {type(tm).__name__})")
-        for k, v in tm.items():
-            if not isinstance(k, str) or not isinstance(v, str):
-                raise ValueError(f"{p}: 'type_map' keys and values must be strings (got {k!r}: {v!r})")
-
-    if "skip_types" in data:
-        st = data["skip_types"]
-        if not isinstance(st, list) or not all(isinstance(x, str) for x in st):
-            raise ValueError(f"{p}: 'skip_types' must be a list of strings (got {type(st).__name__})")
-
-    if "date_format" in data:
-        df = data["date_format"]
-        if not isinstance(df, str):
-            raise ValueError(f"{p}: 'date_format' must be a string (got {type(df).__name__})")
-
-    if "defaults" in data:
-        d = data["defaults"]
-        if not isinstance(d, dict):
-            raise ValueError(f"{p}: 'defaults' must be a dict (got {type(d).__name__})")
-        for k, v in d.items():
-            if not isinstance(k, str) or not isinstance(v, str):
-                raise ValueError(f"{p}: 'defaults' keys and values must be strings (got {k!r}: {v!r})")
-
-    if "sweep_types" in data:
-        sw = data["sweep_types"]
-        if not isinstance(sw, dict):
-            raise ValueError(f"{p}: 'sweep_types' must be a dict (got {type(sw).__name__})")
-        unknown_sw = sorted(set(sw) - _VALID_SWEEP_KEYS)
-        if unknown_sw:
-            raise ValueError(
-                f"{p}: sweep_types has unknown key(s) {unknown_sw}\n"
+    @classmethod
+    def from_dict(cls, data: dict, config_path: str) -> "SweepConfig":
+        unknown = sorted(set(data) - _VALID_SWEEP_KEYS)
+        if unknown:
+            raise ConfigurationError(
+                f"{config_path}: sweep_types has unknown key(s) {unknown}\n"
                 f"Valid sweep_types keys: {sorted(_VALID_SWEEP_KEYS)}"
             )
-        types = sw.get("types")
+        types = data.get("types")
         if not isinstance(types, list) or not types or not all(isinstance(x, str) for x in types):
-            raise ValueError(f"{p}: sweep_types.'types' must be a non-empty list of strings")
+            raise ConfigurationError(f"{config_path}: sweep_types.'types' must be a non-empty list of strings")
         for key in ("quantity_col", "price_override"):
-            if key in sw and not isinstance(sw[key], str):
-                raise ValueError(f"{p}: sweep_types.'{key}' must be a string (got {type(sw[key]).__name__})")
+            if key in data and not isinstance(data[key], str):
+                raise ConfigurationError(
+                    f"{config_path}: sweep_types.'{key}' must be a string (got {type(data[key]).__name__})"
+                )
+        return cls(
+            types=set(types),
+            quantity_col=data.get("quantity_col"),
+            price_override=data.get("price_override"),
+        )
 
-    return data  # type: ignore[return-value]
+
+@dataclass
+class AppConfig:
+    column_map: dict[str, str]
+    type_map: dict[str, str] = field(default_factory=dict)
+    skip_types: set[str] = field(default_factory=set)
+    date_format: str | None = None
+    defaults: dict[str, str] = field(default_factory=dict)
+    sweep: SweepConfig | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict, config_path: str = "config") -> "AppConfig":
+        """Parse and validate a raw config dict; raise ConfigurationError for any problem found."""
+        p = config_path
+
+        unknown = sorted(set(data) - _VALID_CONFIG_KEYS)
+        if unknown:
+            raise ConfigurationError(
+                f"{p}: unknown key(s) {unknown}\n"
+                f"Valid keys: {sorted(_VALID_CONFIG_KEYS)}"
+            )
+
+        cm = data.get("column_map")
+        if not cm or not isinstance(cm, dict):
+            raise ConfigurationError(
+                f"{p}: 'column_map' must be a non-empty dict mapping broker column names to ACB column names"
+            )
+        for k, v in cm.items():
+            if not isinstance(k, str) or not isinstance(v, str):
+                raise ConfigurationError(
+                    f"{p}: 'column_map' keys and values must be strings (got {k!r}: {v!r})"
+                )
+
+        if "type_map" in data:
+            tm = data["type_map"]
+            if not isinstance(tm, dict):
+                raise ConfigurationError(f"{p}: 'type_map' must be a dict (got {type(tm).__name__})")
+            for k, v in tm.items():
+                if not isinstance(k, str) or not isinstance(v, str):
+                    raise ConfigurationError(
+                        f"{p}: 'type_map' keys and values must be strings (got {k!r}: {v!r})"
+                    )
+
+        if "skip_types" in data:
+            st = data["skip_types"]
+            if not isinstance(st, list) or not all(isinstance(x, str) for x in st):
+                raise ConfigurationError(f"{p}: 'skip_types' must be a list of strings (got {type(st).__name__})")
+
+        if "date_format" in data:
+            df = data["date_format"]
+            if not isinstance(df, str):
+                raise ConfigurationError(f"{p}: 'date_format' must be a string (got {type(df).__name__})")
+
+        if "defaults" in data:
+            d = data["defaults"]
+            if not isinstance(d, dict):
+                raise ConfigurationError(f"{p}: 'defaults' must be a dict (got {type(d).__name__})")
+            for k, v in d.items():
+                if not isinstance(k, str) or not isinstance(v, str):
+                    raise ConfigurationError(
+                        f"{p}: 'defaults' keys and values must be strings (got {k!r}: {v!r})"
+                    )
+
+        sweep = None
+        if "sweep_types" in data:
+            sw = data["sweep_types"]
+            if not isinstance(sw, dict):
+                raise ConfigurationError(f"{p}: 'sweep_types' must be a dict (got {type(sw).__name__})")
+            sweep = SweepConfig.from_dict(sw, config_path)
+
+        return cls(
+            column_map=cm,
+            type_map=data.get("type_map", {}),
+            skip_types=set(data.get("skip_types", [])),
+            date_format=data.get("date_format"),
+            defaults=data.get("defaults", {}),
+            sweep=sweep,
+        )
 
 
-def load_config(config_path: str) -> MappingConfig:
+def load_config(config_path: str) -> AppConfig:
     with open(config_path) as f:
         data = json.load(f)
     if not isinstance(data, dict):
-        raise ValueError(f"{config_path}: mapping config must be a JSON object")
-    return validate_config(data, config_path)
+        raise ConfigurationError(f"{config_path}: mapping config must be a JSON object")
+    return AppConfig.from_dict(data, config_path)
 
 
 def validate_column_map(column_map, csv_headers, config_path="config", sweep_quantity_col=None):
@@ -163,7 +198,7 @@ def validate_column_map(column_map, csv_headers, config_path="config", sweep_qua
     if sweep_quantity_col and sweep_quantity_col not in csv_col_set:
         missing.append(f"{sweep_quantity_col} (sweep_types.quantity_col)")
     if missing:
-        raise ValueError(
+        raise ConfigurationError(
             f"{config_path}: columns not found in CSV: {missing}\n"
             f"Available columns: {sorted(csv_col_set)}"
         )
@@ -175,15 +210,14 @@ def clean_number(s):
     return s
 
 
-def translate_rows(rows, config: MappingConfig):
+def translate_rows(rows, config: AppConfig):
     """Yield translated row dicts, one per input row."""
-    column_map = config["column_map"]
-    type_map = config.get("type_map", {})
-    skip_types = set(config.get("skip_types", []))
-    date_format = config.get("date_format")
-    defaults = config.get("defaults", {})
-    sweep_types_config = config.get("sweep_types", {})
-    sweep_type_set = set(sweep_types_config.get("types", []))
+    column_map = config.column_map
+    type_map = config.type_map
+    skip_types = config.skip_types
+    date_format = config.date_format
+    defaults = config.defaults
+    sweep = config.sweep
 
     # start=2: DictReader consumed row 1 as the header, so first data row is spreadsheet row 2
     for row_num, row in enumerate(rows, start=2):
@@ -196,7 +230,7 @@ def translate_rows(rows, config: MappingConfig):
 
         # Raise early if the type column is present but blank.
         if "type" in out and not out["type"].strip():
-            raise ValueError(
+            raise TranslationError(
                 f"row {row_num}: 'type' column is blank — check the column mapped to 'type' in column_map"
             )
 
@@ -205,31 +239,31 @@ def translate_rows(rows, config: MappingConfig):
             continue
 
         # Clean numeric fields; quantity is always positive (sign is encoded in type).
-        for field in ("price", "quantity"):
-            if field in out:
-                out[field] = clean_number(out[field])
+        for col in ("price", "quantity"):
+            if col in out:
+                out[col] = clean_number(out[col])
         if "quantity" in out:
             out["quantity"] = out["quantity"].lstrip("-")
 
         # Sweep type override: some brokers store quantity/price in alternate columns for
         # sweep transaction types (e.g. Vanguard puts dollar amount in Net Amount for sweeps).
         # Checked against the raw broker type value, before type_map remapping.
-        if sweep_type_set and out.get("type") in sweep_type_set:
-            if "quantity_col" in sweep_types_config:
-                col = sweep_types_config["quantity_col"]
+        if sweep and out.get("type") in sweep.types:
+            if sweep.quantity_col:
+                col = sweep.quantity_col
                 if col not in row:
-                    raise ValueError(
+                    raise TranslationError(
                         f"row {row_num}: sweep_types quantity_col {col!r} not found in row"
                     )
                 out["quantity"] = clean_number(row[col]).lstrip("-")
-            if "price_override" in sweep_types_config:
-                out["price"] = sweep_types_config["price_override"]
+            if sweep.price_override:
+                out["price"] = sweep.price_override
 
         # Remap type values.
         if type_map and "type" in out:
             raw = out["type"]
             if raw not in type_map:
-                raise ValueError(
+                raise TranslationError(
                     f"row {row_num}: unknown type value {raw!r} — add it to type_map in your mapping config"
                 )
             out["type"] = type_map[raw]
@@ -240,7 +274,7 @@ def translate_rows(rows, config: MappingConfig):
             try:
                 out["date"] = datetime.strptime(raw_date, date_format).strftime("%Y-%m-%d")
             except ValueError:
-                raise ValueError(
+                raise TranslationError(
                     f"row {row_num} ({out.get('ticker', '?')}): date {raw_date!r} does not match "
                     f"format {date_format!r} (hint: use %Y for 4-digit year, %y for 2-digit)"
                 )
@@ -254,15 +288,15 @@ def translate_rows(rows, config: MappingConfig):
         # This is the primary safeguard against column mapping mis-configurations (e.g. a broker
         # that stores quantity in a non-standard column silently producing 0-share rows).
         loc = f"row {row_num} ({out.get('ticker', '?')} on {out.get('date', '?')})"
-        for field in ("quantity", "price"):
-            if field in out:
+        for col in ("quantity", "price"):
+            if col in out:
                 try:
-                    val = float(out[field])
+                    val = float(out[col])
                 except (ValueError, TypeError):
-                    raise ValueError(f"{loc}: {field} {out[field]!r} is not a valid number")
+                    raise TranslationError(f"{loc}: {col} {out[col]!r} is not a valid number")
                 if val == 0:
-                    raise ValueError(
-                        f"{loc}: {field} is 0 — check your column_map or sweep_types config"
+                    raise TranslationError(
+                        f"{loc}: {col} is 0 — check your column_map or sweep_types config"
                     )
 
         yield out
@@ -285,7 +319,7 @@ def validate_columns(rows):
     present = set(collected[0].keys())
     for col in REQUIRED_COLUMNS:
         if col not in present:
-            raise ValueError(
+            raise ConfigurationError(
                 f"missing required column {col!r} in translated output — "
                 f"check your column_map"
             )
@@ -300,7 +334,7 @@ def load_fx_rates(fx_dir):
             reader = csv.DictReader(f)
             fx_col = next((c for c in (reader.fieldnames or []) if FX_COL_RE.match(c)), None)
             if fx_col is None:
-                raise ValueError(
+                raise FXRateError(
                     f"{path.name}: no Bank of Canada FX column found "
                     f"(expected a column like FXUSDCAD)"
                 )
@@ -315,7 +349,7 @@ def load_fx_rates(fx_dir):
 def lookup_rate(date_rates, currency, date):
     """Return rate string for date, falling back to the previous available date.
 
-    Raises ValueError if date is beyond the end of the data or before it begins.
+    Raises FXRateError if date is beyond the end of the data or before it begins.
     """
     sorted_dates = sorted(date_rates)
     # Limitation: if the requested date is a weekend/holiday that falls exactly at the end of
@@ -323,13 +357,13 @@ def lookup_rate(date_rates, currency, date):
     # 12/31 was a non-business day), this raises instead of falling back to 12/30. The fix
     # would require knowing the user's intended end date vs. the file's actual last entry.
     if date > sorted_dates[-1]:
-        raise ValueError(
+        raise FXRateError(
             f"no FX rate for '{currency}' on {date} — "
             f"latest available is {sorted_dates[-1]}; download a newer file"
         )
     candidates = [d for d in sorted_dates if d <= date]
     if not candidates:
-        raise ValueError(
+        raise FXRateError(
             f"no FX rate for '{currency}' on {date} — "
             f"earliest available is {sorted_dates[0]}; download an older file"
         )
@@ -344,7 +378,7 @@ def apply_fx_rates(rows, fx_rates):
         currency = row.get("currency", "CAD").upper()
         if currency != "CAD" and not row.get("exchange_rate"):
             if currency not in fx_rates:
-                raise ValueError(
+                raise FXRateError(
                     f"no FX rate data for '{currency}' — "
                     f"add a Bank of Canada FX{currency}CAD file to the --fx-dir directory"
                 )
@@ -370,26 +404,41 @@ def main():
     parser.add_argument("--fx-dir", metavar="DIR", help="directory of Bank of Canada FX rate CSVs for automatic exchange rate lookup")
     args = parser.parse_args()
 
-    config = load_config(args.mapping_config)
+    try:
+        config = load_config(args.mapping_config)
+    except (ConfigurationError, json.JSONDecodeError, OSError) as e:
+        print(f"Configuration error: {e}", file=sys.stderr)
+        sys.exit(1)
 
-    with open(args.input_csv, newline="") as f:
-        raw_rows = list(csv.DictReader(f))
+    try:
+        with open(args.input_csv, newline="") as f:
+            raw_rows = list(csv.DictReader(f))
+    except OSError as e:
+        print(f"Input error: {e}", file=sys.stderr)
+        sys.exit(1)
 
-    if raw_rows:
-        sweep_quantity_col = config.get("sweep_types", {}).get("quantity_col")
-        validate_column_map(
-            config["column_map"],
-            raw_rows[0].keys(),
-            config_path=args.mapping_config,
-            sweep_quantity_col=sweep_quantity_col,
-        )
-
-    translated = validate_columns(translate_rows(raw_rows, config))
-    translated = filter_by_date(translated, args.start, args.end)
+    try:
+        if raw_rows:
+            sweep_quantity_col = config.sweep.quantity_col if config.sweep else None
+            validate_column_map(
+                config.column_map,
+                raw_rows[0].keys(),
+                config_path=args.mapping_config,
+                sweep_quantity_col=sweep_quantity_col,
+            )
+        translated = validate_columns(translate_rows(raw_rows, config))
+        translated = filter_by_date(translated, args.start, args.end)
+    except (ConfigurationError, TranslationError) as e:
+        print(f"Translation error: {e}", file=sys.stderr)
+        sys.exit(1)
 
     if args.fx_dir:
-        fx_rates = load_fx_rates(args.fx_dir)
-        translated = apply_fx_rates(translated, fx_rates)
+        try:
+            fx_rates = load_fx_rates(args.fx_dir)
+            translated = apply_fx_rates(translated, fx_rates)
+        except FXRateError as e:
+            print(f"Exchange rate error: {e}", file=sys.stderr)
+            sys.exit(1)
 
     # Determine which ACB columns are actually present in the output.
     present = set()

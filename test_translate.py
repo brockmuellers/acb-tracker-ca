@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from translate import (
+    AppConfig,
     apply_fx_rates,
     clean_number,
     filter_by_date,
@@ -17,7 +18,6 @@ from translate import (
     translate_rows,
     validate_column_map,
     validate_columns,
-    validate_config,
 )
 
 REPO = Path(__file__).parent
@@ -71,7 +71,7 @@ def test_clean_number_passthrough():
 
 def test_column_renaming():
     rows = [make_row()]
-    out = list(translate_rows(rows, BASE_CONFIG))
+    out = list(translate_rows(rows, AppConfig.from_dict(BASE_CONFIG)))
     assert out[0]["date"] == "2024-01-15"
     assert out[0]["ticker"] == "VFV"
     assert out[0]["type"] == "BUY"
@@ -81,7 +81,7 @@ def test_column_renaming():
 
 def test_unmapped_columns_dropped():
     rows = [make_row()]
-    out = list(translate_rows(rows, BASE_CONFIG))
+    out = list(translate_rows(rows, AppConfig.from_dict(BASE_CONFIG)))
     assert "Ignored Column" not in out[0]
     assert "Trade Date" not in out[0]
 
@@ -89,14 +89,14 @@ def test_unmapped_columns_dropped():
 # --- type_map ---
 
 def test_type_map_remaps_value():
-    config = {**BASE_CONFIG, "type_map": {"Buy": "BUY", "Sell": "SELL"}}
+    config = AppConfig.from_dict({**BASE_CONFIG, "type_map": {"Buy": "BUY", "Sell": "SELL"}})
     rows = [make_row(**{"Txn Type": "Buy"})]
     out = list(translate_rows(rows, config))
     assert out[0]["type"] == "BUY"
 
 
 def test_type_map_unknown_value_raises():
-    config = {**BASE_CONFIG, "type_map": {"Buy": "BUY"}}
+    config = AppConfig.from_dict({**BASE_CONFIG, "type_map": {"Buy": "BUY"}})
     rows = [make_row(**{"Txn Type": "Dividend"})]
     with pytest.raises(ValueError, match="unknown type value 'Dividend'"):
         list(translate_rows(rows, config))
@@ -104,14 +104,14 @@ def test_type_map_unknown_value_raises():
 
 def test_no_type_map_passes_value_through():
     rows = [make_row(**{"Txn Type": "BUY"})]
-    out = list(translate_rows(rows, BASE_CONFIG))
+    out = list(translate_rows(rows, AppConfig.from_dict(BASE_CONFIG)))
     assert out[0]["type"] == "BUY"
 
 
 # --- date_format ---
 
 def test_date_format_converts_to_iso():
-    config = {**BASE_CONFIG, "date_format": "%m/%d/%Y"}
+    config = AppConfig.from_dict({**BASE_CONFIG, "date_format": "%m/%d/%Y"})
     rows = [make_row(**{"Trade Date": "01/15/2024"})]
     out = list(translate_rows(rows, config))
     assert out[0]["date"] == "2024-01-15"
@@ -119,7 +119,7 @@ def test_date_format_converts_to_iso():
 
 def test_no_date_format_passes_date_through():
     rows = [make_row(**{"Trade Date": "2024-01-15"})]
-    out = list(translate_rows(rows, BASE_CONFIG))
+    out = list(translate_rows(rows, AppConfig.from_dict(BASE_CONFIG)))
     assert out[0]["date"] == "2024-01-15"
 
 
@@ -127,40 +127,40 @@ def test_no_date_format_passes_date_through():
 
 def test_dollar_stripped_from_price():
     rows = [make_row(**{"Price ($)": "$98.50"})]
-    out = list(translate_rows(rows, BASE_CONFIG))
+    out = list(translate_rows(rows, AppConfig.from_dict(BASE_CONFIG)))
     assert out[0]["price"] == "98.50"
 
 
 def test_commas_stripped_from_quantity():
     rows = [make_row(**{"Shares": "1,000"})]
-    out = list(translate_rows(rows, BASE_CONFIG))
+    out = list(translate_rows(rows, AppConfig.from_dict(BASE_CONFIG)))
     assert out[0]["quantity"] == "1000"
 
 
 # --- defaults ---
 
 def test_defaults_fill_missing_column():
-    config = {**BASE_CONFIG, "defaults": {"currency": "CAD"}}
+    config = AppConfig.from_dict({**BASE_CONFIG, "defaults": {"currency": "CAD"}})
     rows = [make_row()]
     out = list(translate_rows(rows, config))
     assert out[0]["currency"] == "CAD"
 
 
 def test_defaults_fill_empty_column():
-    config = {
+    config = AppConfig.from_dict({
         "column_map": {**BASE_CONFIG["column_map"], "Currency": "currency"},
         "defaults": {"currency": "CAD"},
-    }
+    })
     rows = [make_row(**{"Currency": ""})]
     out = list(translate_rows(rows, config))
     assert out[0]["currency"] == "CAD"
 
 
 def test_defaults_do_not_overwrite_existing_value():
-    config = {
+    config = AppConfig.from_dict({
         "column_map": {**BASE_CONFIG["column_map"], "Currency": "currency"},
         "defaults": {"currency": "CAD"},
-    }
+    })
     rows = [make_row(**{"Currency": "USD"})]
     out = list(translate_rows(rows, config))
     assert out[0]["currency"] == "USD"
@@ -272,7 +272,7 @@ def test_cli_start_and_end_flags_together(tmp_path):
 # --- validation ---
 
 def test_missing_required_column_raises():
-    config = {
+    config = AppConfig.from_dict({
         "column_map": {
             "Trade Date": "date",
             "Symbol": "ticker",
@@ -280,7 +280,7 @@ def test_missing_required_column_raises():
             "Shares": "quantity",
             "Price ($)": "price",
         }
-    }
+    })
     rows = [make_row()]
     with pytest.raises(ValueError, match="missing required column 'type'"):
         validate_columns(translate_rows(rows, config))
@@ -288,12 +288,12 @@ def test_missing_required_column_raises():
 
 def test_validate_passes_with_all_required_columns():
     rows = [make_row()]
-    result = validate_columns(translate_rows(rows, BASE_CONFIG))
+    result = validate_columns(translate_rows(rows, AppConfig.from_dict(BASE_CONFIG)))
     assert len(result) == 1
 
 
 def test_validate_empty_input_returns_empty():
-    result = validate_columns(translate_rows([], BASE_CONFIG))
+    result = validate_columns(translate_rows([], AppConfig.from_dict(BASE_CONFIG)))
     assert result == []
 
 
@@ -513,7 +513,7 @@ def test_apply_fx_rates_unknown_currency_raises():
 # --- skip_types ---
 
 def test_skip_types_drops_matching_rows():
-    config = {**BASE_CONFIG, "skip_types": ["Dividend"]}
+    config = AppConfig.from_dict({**BASE_CONFIG, "skip_types": ["Dividend"]})
     rows = [
         make_row(**{"Txn Type": "BUY"}),
         make_row(**{"Txn Type": "Dividend"}),
@@ -525,14 +525,14 @@ def test_skip_types_drops_matching_rows():
 
 
 def test_skip_types_does_not_raise_for_skipped_unknown_type():
-    config = {**BASE_CONFIG, "type_map": {"BUY": "BUY"}, "skip_types": ["Dividend"]}
+    config = AppConfig.from_dict({**BASE_CONFIG, "type_map": {"BUY": "BUY"}, "skip_types": ["Dividend"]})
     rows = [make_row(**{"Txn Type": "Dividend"})]
     out = list(translate_rows(rows, config))
     assert out == []
 
 
 def test_skip_types_empty_list_skips_nothing():
-    config = {**BASE_CONFIG, "skip_types": []}
+    config = AppConfig.from_dict({**BASE_CONFIG, "skip_types": []})
     rows = [make_row(**{"Txn Type": "BUY"})]
     out = list(translate_rows(rows, config))
     assert len(out) == 1
@@ -543,31 +543,31 @@ def test_skip_types_empty_list_skips_nothing():
 def test_zero_quantity_raises():
     rows = [make_row(**{"Shares": "0"})]
     with pytest.raises(ValueError, match="quantity is 0"):
-        list(translate_rows(rows, BASE_CONFIG))
+        list(translate_rows(rows, AppConfig.from_dict(BASE_CONFIG)))
 
 
 def test_zero_price_raises():
     rows = [make_row(**{"Price ($)": "0"})]
     with pytest.raises(ValueError, match="price is 0"):
-        list(translate_rows(rows, BASE_CONFIG))
+        list(translate_rows(rows, AppConfig.from_dict(BASE_CONFIG)))
 
 
 def test_nonzero_quantity_and_price_do_not_raise():
     rows = [make_row()]
-    out = list(translate_rows(rows, BASE_CONFIG))
+    out = list(translate_rows(rows, AppConfig.from_dict(BASE_CONFIG)))
     assert len(out) == 1
 
 
 def test_zero_validation_fires_after_sweep_override():
     """A sweep row with price_override must not raise even if mapped price column is 0."""
-    config = {
+    config = AppConfig.from_dict({
         **BASE_CONFIG,
         "sweep_types": {
             "types": ["Sweep in"],
             "quantity_col": "Net Amount",
             "price_override": "1.0",
         },
-    }
+    })
     row = make_sweep_row()  # Price ($)=0, Net Amount=-53.03
     out = list(translate_rows([row], config))
     assert out[0]["price"] == "1.0"
@@ -578,13 +578,13 @@ def test_zero_validation_fires_after_sweep_override():
 
 def test_negative_quantity_stripped():
     rows = [make_row(**{"Shares": "-1.6289"})]
-    out = list(translate_rows(rows, BASE_CONFIG))
+    out = list(translate_rows(rows, AppConfig.from_dict(BASE_CONFIG)))
     assert out[0]["quantity"] == "1.6289"
 
 
 def test_positive_quantity_unchanged():
     rows = [make_row(**{"Shares": "1.6289"})]
-    out = list(translate_rows(rows, BASE_CONFIG))
+    out = list(translate_rows(rows, AppConfig.from_dict(BASE_CONFIG)))
     assert out[0]["quantity"] == "1.6289"
 
 
@@ -631,14 +631,14 @@ def test_cli_fx_dir_populates_exchange_rate(tmp_path):
 
 # --- sweep_types ---
 
-SWEEP_CONFIG = {
+SWEEP_CONFIG = AppConfig.from_dict({
     **BASE_CONFIG,
     "sweep_types": {
         "types": ["Sweep in", "Sweep out"],
         "quantity_col": "Net Amount",
         "price_override": "1.0",
     },
-}
+})
 
 
 def make_sweep_row(**kwargs):
@@ -690,10 +690,10 @@ def test_sweep_type_non_sweep_transaction_unaffected():
 
 
 def test_sweep_type_missing_quantity_col_raises():
-    config = {
+    config = AppConfig.from_dict({
         **BASE_CONFIG,
         "sweep_types": {"types": ["Sweep in"], "quantity_col": "Nonexistent Column"},
-    }
+    })
     with pytest.raises(ValueError, match="quantity_col"):
         list(translate_rows([make_sweep_row()], config))
 
@@ -740,21 +740,21 @@ def test_validate_column_map_passes_when_sweep_quantity_col_present():
 # --- improved error context (row numbers, column names) ---
 
 def test_unknown_type_error_includes_row_number():
-    config = {**BASE_CONFIG, "type_map": {"Buy": "BUY", "Sell": "SELL"}}
+    config = AppConfig.from_dict({**BASE_CONFIG, "type_map": {"Buy": "BUY", "Sell": "SELL"}})
     rows = [make_row(**{"Txn Type": "Buy"}), make_row(**{"Txn Type": "Dividend"})]
     with pytest.raises(ValueError, match=r"row 3"):
         list(translate_rows(rows, config))
 
 
 def test_date_parse_error_includes_row_number_and_value():
-    config = {**BASE_CONFIG, "date_format": "%m/%d/%Y"}
+    config = AppConfig.from_dict({**BASE_CONFIG, "date_format": "%m/%d/%Y"})
     rows = [make_row(**{"Trade Date": "2024-01-15"})]
     with pytest.raises(ValueError, match=r"row 2.*2024-01-15.*%m/%d/%Y"):
         list(translate_rows(rows, config))
 
 
 def test_date_parse_error_includes_ticker():
-    config = {**BASE_CONFIG, "date_format": "%m/%d/%Y"}
+    config = AppConfig.from_dict({**BASE_CONFIG, "date_format": "%m/%d/%Y"})
     rows = [make_row(**{"Trade Date": "2024-01-15", "Symbol": "AAPL"})]
     with pytest.raises(ValueError, match="AAPL"):
         list(translate_rows(rows, config))
@@ -763,16 +763,16 @@ def test_date_parse_error_includes_ticker():
 def test_blank_type_raises_clear_error():
     rows = [make_row(**{"Txn Type": ""})]
     with pytest.raises(ValueError, match="row 2.*'type' column is blank"):
-        list(translate_rows(rows, BASE_CONFIG))
+        list(translate_rows(rows, AppConfig.from_dict(BASE_CONFIG)))
 
 
 def test_zero_quantity_error_includes_row_number():
     rows = [make_row(**{"Shares": "0"})]
     with pytest.raises(ValueError, match=r"row 2"):
-        list(translate_rows(rows, BASE_CONFIG))
+        list(translate_rows(rows, AppConfig.from_dict(BASE_CONFIG)))
 
 
-# --- validate_config ---
+# --- AppConfig.from_dict ---
 
 MINIMAL_CONFIG = {"column_map": {"Date": "date", "Symbol": "ticker", "Action": "type", "Qty": "quantity", "Price": "price"}}
 FULL_CONFIG = {
@@ -785,91 +785,91 @@ FULL_CONFIG = {
 }
 
 
-def test_validate_config_passes_minimal():
-    result = validate_config(MINIMAL_CONFIG)
-    assert result["column_map"] == MINIMAL_CONFIG["column_map"]
+def test_from_dict_passes_minimal():
+    result = AppConfig.from_dict(MINIMAL_CONFIG)
+    assert result.column_map == MINIMAL_CONFIG["column_map"]
 
 
-def test_validate_config_passes_full():
-    result = validate_config(FULL_CONFIG)
-    assert result["type_map"] == {"Buy": "BUY", "Sell": "SELL"}
+def test_from_dict_passes_full():
+    result = AppConfig.from_dict(FULL_CONFIG)
+    assert result.type_map == {"Buy": "BUY", "Sell": "SELL"}
 
 
-def test_validate_config_unknown_top_level_key_raises():
+def test_from_dict_unknown_top_level_key_raises():
     bad = {**MINIMAL_CONFIG, "colum_map": {}}  # typo
     with pytest.raises(ValueError, match="unknown key"):
-        validate_config(bad, "test.json")
+        AppConfig.from_dict(bad, "test.json")
 
 
-def test_validate_config_unknown_key_lists_valid_keys():
+def test_from_dict_unknown_key_lists_valid_keys():
     bad = {**MINIMAL_CONFIG, "sweepTypes": {}}  # camelCase typo
     with pytest.raises(ValueError, match="Valid keys"):
-        validate_config(bad, "test.json")
+        AppConfig.from_dict(bad, "test.json")
 
 
-def test_validate_config_missing_column_map_raises():
+def test_from_dict_missing_column_map_raises():
     with pytest.raises(ValueError, match="column_map"):
-        validate_config({}, "test.json")
+        AppConfig.from_dict({}, "test.json")
 
 
-def test_validate_config_empty_column_map_raises():
+def test_from_dict_empty_column_map_raises():
     with pytest.raises(ValueError, match="column_map"):
-        validate_config({"column_map": {}}, "test.json")
+        AppConfig.from_dict({"column_map": {}}, "test.json")
 
 
-def test_validate_config_wrong_type_column_map_raises():
+def test_from_dict_wrong_type_column_map_raises():
     with pytest.raises(ValueError, match="column_map"):
-        validate_config({"column_map": ["list", "not", "dict"]}, "test.json")
+        AppConfig.from_dict({"column_map": ["list", "not", "dict"]}, "test.json")
 
 
-def test_validate_config_wrong_type_type_map_raises():
+def test_from_dict_wrong_type_type_map_raises():
     bad = {**MINIMAL_CONFIG, "type_map": ["Buy", "Sell"]}
     with pytest.raises(ValueError, match="type_map"):
-        validate_config(bad, "test.json")
+        AppConfig.from_dict(bad, "test.json")
 
 
-def test_validate_config_wrong_type_skip_types_raises():
+def test_from_dict_wrong_type_skip_types_raises():
     bad = {**MINIMAL_CONFIG, "skip_types": "Dividend"}
     with pytest.raises(ValueError, match="skip_types"):
-        validate_config(bad, "test.json")
+        AppConfig.from_dict(bad, "test.json")
 
 
-def test_validate_config_wrong_type_date_format_raises():
+def test_from_dict_wrong_type_date_format_raises():
     bad = {**MINIMAL_CONFIG, "date_format": 20240101}
     with pytest.raises(ValueError, match="date_format"):
-        validate_config(bad, "test.json")
+        AppConfig.from_dict(bad, "test.json")
 
 
-def test_validate_config_wrong_type_defaults_raises():
+def test_from_dict_wrong_type_defaults_raises():
     bad = {**MINIMAL_CONFIG, "defaults": "CAD"}
     with pytest.raises(ValueError, match="defaults"):
-        validate_config(bad, "test.json")
+        AppConfig.from_dict(bad, "test.json")
 
 
-def test_validate_config_sweep_types_missing_types_raises():
+def test_from_dict_sweep_types_missing_types_raises():
     bad = {**MINIMAL_CONFIG, "sweep_types": {"quantity_col": "Net Amount"}}
     with pytest.raises(ValueError, match="sweep_types.'types'"):
-        validate_config(bad, "test.json")
+        AppConfig.from_dict(bad, "test.json")
 
 
-def test_validate_config_sweep_types_empty_types_raises():
+def test_from_dict_sweep_types_empty_types_raises():
     bad = {**MINIMAL_CONFIG, "sweep_types": {"types": []}}
     with pytest.raises(ValueError, match="sweep_types.'types'"):
-        validate_config(bad, "test.json")
+        AppConfig.from_dict(bad, "test.json")
 
 
-def test_validate_config_sweep_types_unknown_key_raises():
+def test_from_dict_sweep_types_unknown_key_raises():
     bad = {**MINIMAL_CONFIG, "sweep_types": {"types": ["Sweep in"], "qty_col": "Net Amount"}}  # typo
     with pytest.raises(ValueError, match="sweep_types has unknown key"):
-        validate_config(bad, "test.json")
+        AppConfig.from_dict(bad, "test.json")
 
 
-def test_validate_config_sweep_types_unknown_key_lists_valid_keys():
+def test_from_dict_sweep_types_unknown_key_lists_valid_keys():
     bad = {**MINIMAL_CONFIG, "sweep_types": {"types": ["Sweep in"], "qty_col": "Net Amount"}}
     with pytest.raises(ValueError, match="Valid sweep_types keys"):
-        validate_config(bad, "test.json")
+        AppConfig.from_dict(bad, "test.json")
 
 
-def test_validate_config_error_includes_config_path():
+def test_from_dict_error_includes_config_path():
     with pytest.raises(ValueError, match="mybroker.json"):
-        validate_config({}, "mybroker.json")
+        AppConfig.from_dict({}, "mybroker.json")
