@@ -41,7 +41,9 @@ v1 simplifications (intentional, see plan):
 import argparse
 import csv
 import sys
-from decimal import Decimal, ROUND_HALF_EVEN
+from decimal import ROUND_HALF_EVEN, Decimal
+
+from tabulate import tabulate
 
 CENTS = Decimal("0.01")
 ONE = Decimal("1")
@@ -88,10 +90,15 @@ def compute_acb(rows):
     Per-ticker state is (shares, total_acb), both Decimal and always CAD.
     """
     holdings = {}  # ticker -> [shares, total_acb]
+    seen_ticker_dates = set()
     # Stable sort by date; ties keep original input order.
     ordered = sorted(enumerate(rows), key=lambda p: (p[1]["date"], p[0]))
 
     for _, tx in ordered:
+        key = (tx["ticker"], tx["date"])
+        if key in seen_ticker_dates:
+            print(f"Note: multiple transactions for {tx['ticker']} on {tx['date']}", flush=True)
+        seen_ticker_dates.add(key)
         ticker, tx_type = tx["ticker"], tx["type"]
         qty, price = tx["quantity"], tx["price"]
         currency, rate = tx["currency"], tx["exchange_rate"]
@@ -115,7 +122,7 @@ def compute_acb(rows):
         elif tx_type == "SELL":
             if qty > shares:
                 raise ValueError(
-                    f"SELL of {ticker} on {tx['date']} exceeds holdings"
+                    f"SELL of {ticker} on {tx['date']} exceeds holdings: {qty} > {shares}"
                 )
             # CRA average-cost rule: per-share ACB unchanged by a sell.
             acb_per_share = total_acb / shares
@@ -147,8 +154,10 @@ def write_csv(rows, out):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    # TODO: optionally accept a directory, processing all files in it in alphabetical order.
     parser.add_argument("inputs", nargs="+", help="input transaction CSV(s)")
     parser.add_argument("-o", "--output", help="output CSV (default: stdout)")
+    parser.add_argument("-p", "--pretty", action="store_true", help="pretty-print console output")
     args = parser.parse_args()
 
     rows = load_transactions(args.inputs)
@@ -157,6 +166,8 @@ def main():
     if args.output:
         with open(args.output, "w", newline="") as f:
             write_csv(output_rows, f)
+    elif args.pretty:
+        print(tabulate(output_rows, headers="keys", tablefmt="grid"))
     else:
         write_csv(output_rows, sys.stdout)
 

@@ -129,3 +129,4 @@ python3 -m pytest test_acb.py test_translate.py -v
 - Transaction notes / comments.
 - Row de-duplication.
 - ETF conversion (must be treated as BUY/SELL with manually calculated amounts that correctly transfer cost basis.)
+- Custom ordering of transactions that occurred on the same day.
