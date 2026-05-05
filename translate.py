@@ -53,18 +53,107 @@ import re
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import TypedDict
 
 ACB_INPUT_COLUMNS = ["date", "ticker", "type", "quantity", "price", "currency", "exchange_rate"]
 REQUIRED_COLUMNS = ["date", "ticker", "type", "quantity", "price"]
 FX_COL_RE = re.compile(r"^FX([A-Z]{3})CAD$")
 
+_VALID_CONFIG_KEYS = frozenset({"column_map", "type_map", "skip_types", "date_format", "defaults", "sweep_types"})
+_VALID_SWEEP_KEYS = frozenset({"types", "quantity_col", "price_override"})
 
-def load_config(config_path):
+
+class _SweepTypesRequired(TypedDict):
+    types: list[str]
+
+
+class SweepTypesConfig(_SweepTypesRequired, total=False):
+    quantity_col: str
+    price_override: str
+
+
+class _MappingConfigRequired(TypedDict):
+    column_map: dict[str, str]
+
+
+class MappingConfig(_MappingConfigRequired, total=False):
+    type_map: dict[str, str]
+    skip_types: list[str]
+    date_format: str
+    defaults: dict[str, str]
+    sweep_types: SweepTypesConfig
+
+
+def validate_config(data: dict, config_path: str = "config") -> MappingConfig:
+    """Validate a raw config dict; raise ValueError with the field name for any problem found."""
+    p = config_path
+
+    unknown = sorted(set(data) - _VALID_CONFIG_KEYS)
+    if unknown:
+        raise ValueError(
+            f"{p}: unknown key(s) {unknown}\n"
+            f"Valid keys: {sorted(_VALID_CONFIG_KEYS)}"
+        )
+
+    cm = data.get("column_map")
+    if not cm or not isinstance(cm, dict):
+        raise ValueError(f"{p}: 'column_map' must be a non-empty dict mapping broker column names to ACB column names")
+    for k, v in cm.items():
+        if not isinstance(k, str) or not isinstance(v, str):
+            raise ValueError(f"{p}: 'column_map' keys and values must be strings (got {k!r}: {v!r})")
+
+    if "type_map" in data:
+        tm = data["type_map"]
+        if not isinstance(tm, dict):
+            raise ValueError(f"{p}: 'type_map' must be a dict (got {type(tm).__name__})")
+        for k, v in tm.items():
+            if not isinstance(k, str) or not isinstance(v, str):
+                raise ValueError(f"{p}: 'type_map' keys and values must be strings (got {k!r}: {v!r})")
+
+    if "skip_types" in data:
+        st = data["skip_types"]
+        if not isinstance(st, list) or not all(isinstance(x, str) for x in st):
+            raise ValueError(f"{p}: 'skip_types' must be a list of strings (got {type(st).__name__})")
+
+    if "date_format" in data:
+        df = data["date_format"]
+        if not isinstance(df, str):
+            raise ValueError(f"{p}: 'date_format' must be a string (got {type(df).__name__})")
+
+    if "defaults" in data:
+        d = data["defaults"]
+        if not isinstance(d, dict):
+            raise ValueError(f"{p}: 'defaults' must be a dict (got {type(d).__name__})")
+        for k, v in d.items():
+            if not isinstance(k, str) or not isinstance(v, str):
+                raise ValueError(f"{p}: 'defaults' keys and values must be strings (got {k!r}: {v!r})")
+
+    if "sweep_types" in data:
+        sw = data["sweep_types"]
+        if not isinstance(sw, dict):
+            raise ValueError(f"{p}: 'sweep_types' must be a dict (got {type(sw).__name__})")
+        unknown_sw = sorted(set(sw) - _VALID_SWEEP_KEYS)
+        if unknown_sw:
+            raise ValueError(
+                f"{p}: sweep_types has unknown key(s) {unknown_sw}\n"
+                f"Valid sweep_types keys: {sorted(_VALID_SWEEP_KEYS)}"
+            )
+        types = sw.get("types")
+        if not isinstance(types, list) or not types or not all(isinstance(x, str) for x in types):
+            raise ValueError(f"{p}: sweep_types.'types' must be a non-empty list of strings")
+        for key in ("quantity_col", "price_override"):
+            if key in sw and not isinstance(sw[key], str):
+                raise ValueError(f"{p}: sweep_types.'{key}' must be a string (got {type(sw[key]).__name__})")
+
+    return data  # type: ignore[return-value]
+
+
+def load_config(config_path: str) -> MappingConfig:
     with open(config_path) as f:
-        config = json.load(f)
-    if "column_map" not in config or not config["column_map"]:
-        raise ValueError(f"{config_path}: mapping config must have a non-empty 'column_map'")
-    return config
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError(f"{config_path}: mapping config must be a JSON object")
+    return validate_config(data, config_path)
 
 
 def validate_column_map(column_map, csv_headers, config_path="config", sweep_quantity_col=None):
@@ -86,7 +175,7 @@ def clean_number(s):
     return s
 
 
-def translate_rows(rows, config):
+def translate_rows(rows, config: MappingConfig):
     """Yield translated row dicts, one per input row."""
     column_map = config["column_map"]
     type_map = config.get("type_map", {})

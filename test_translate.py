@@ -17,6 +17,7 @@ from translate import (
     translate_rows,
     validate_column_map,
     validate_columns,
+    validate_config,
 )
 
 REPO = Path(__file__).parent
@@ -769,3 +770,106 @@ def test_zero_quantity_error_includes_row_number():
     rows = [make_row(**{"Shares": "0"})]
     with pytest.raises(ValueError, match=r"row 2"):
         list(translate_rows(rows, BASE_CONFIG))
+
+
+# --- validate_config ---
+
+MINIMAL_CONFIG = {"column_map": {"Date": "date", "Symbol": "ticker", "Action": "type", "Qty": "quantity", "Price": "price"}}
+FULL_CONFIG = {
+    **MINIMAL_CONFIG,
+    "type_map": {"Buy": "BUY", "Sell": "SELL"},
+    "skip_types": ["Dividend"],
+    "date_format": "%m/%d/%Y",
+    "defaults": {"currency": "CAD"},
+    "sweep_types": {"types": ["Sweep in"], "quantity_col": "Net Amount", "price_override": "1.0"},
+}
+
+
+def test_validate_config_passes_minimal():
+    result = validate_config(MINIMAL_CONFIG)
+    assert result["column_map"] == MINIMAL_CONFIG["column_map"]
+
+
+def test_validate_config_passes_full():
+    result = validate_config(FULL_CONFIG)
+    assert result["type_map"] == {"Buy": "BUY", "Sell": "SELL"}
+
+
+def test_validate_config_unknown_top_level_key_raises():
+    bad = {**MINIMAL_CONFIG, "colum_map": {}}  # typo
+    with pytest.raises(ValueError, match="unknown key"):
+        validate_config(bad, "test.json")
+
+
+def test_validate_config_unknown_key_lists_valid_keys():
+    bad = {**MINIMAL_CONFIG, "sweepTypes": {}}  # camelCase typo
+    with pytest.raises(ValueError, match="Valid keys"):
+        validate_config(bad, "test.json")
+
+
+def test_validate_config_missing_column_map_raises():
+    with pytest.raises(ValueError, match="column_map"):
+        validate_config({}, "test.json")
+
+
+def test_validate_config_empty_column_map_raises():
+    with pytest.raises(ValueError, match="column_map"):
+        validate_config({"column_map": {}}, "test.json")
+
+
+def test_validate_config_wrong_type_column_map_raises():
+    with pytest.raises(ValueError, match="column_map"):
+        validate_config({"column_map": ["list", "not", "dict"]}, "test.json")
+
+
+def test_validate_config_wrong_type_type_map_raises():
+    bad = {**MINIMAL_CONFIG, "type_map": ["Buy", "Sell"]}
+    with pytest.raises(ValueError, match="type_map"):
+        validate_config(bad, "test.json")
+
+
+def test_validate_config_wrong_type_skip_types_raises():
+    bad = {**MINIMAL_CONFIG, "skip_types": "Dividend"}
+    with pytest.raises(ValueError, match="skip_types"):
+        validate_config(bad, "test.json")
+
+
+def test_validate_config_wrong_type_date_format_raises():
+    bad = {**MINIMAL_CONFIG, "date_format": 20240101}
+    with pytest.raises(ValueError, match="date_format"):
+        validate_config(bad, "test.json")
+
+
+def test_validate_config_wrong_type_defaults_raises():
+    bad = {**MINIMAL_CONFIG, "defaults": "CAD"}
+    with pytest.raises(ValueError, match="defaults"):
+        validate_config(bad, "test.json")
+
+
+def test_validate_config_sweep_types_missing_types_raises():
+    bad = {**MINIMAL_CONFIG, "sweep_types": {"quantity_col": "Net Amount"}}
+    with pytest.raises(ValueError, match="sweep_types.'types'"):
+        validate_config(bad, "test.json")
+
+
+def test_validate_config_sweep_types_empty_types_raises():
+    bad = {**MINIMAL_CONFIG, "sweep_types": {"types": []}}
+    with pytest.raises(ValueError, match="sweep_types.'types'"):
+        validate_config(bad, "test.json")
+
+
+def test_validate_config_sweep_types_unknown_key_raises():
+    bad = {**MINIMAL_CONFIG, "sweep_types": {"types": ["Sweep in"], "qty_col": "Net Amount"}}  # typo
+    with pytest.raises(ValueError, match="sweep_types has unknown key"):
+        validate_config(bad, "test.json")
+
+
+def test_validate_config_sweep_types_unknown_key_lists_valid_keys():
+    bad = {**MINIMAL_CONFIG, "sweep_types": {"types": ["Sweep in"], "qty_col": "Net Amount"}}
+    with pytest.raises(ValueError, match="Valid sweep_types keys"):
+        validate_config(bad, "test.json")
+
+
+def test_validate_config_error_includes_config_path():
+    with pytest.raises(ValueError, match="mybroker.json"):
+        validate_config({}, "mybroker.json")
