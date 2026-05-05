@@ -68,8 +68,9 @@ def load_config(config_path):
 
 
 def clean_number(s):
-    """Strip leading $, commas, and whitespace from a numeric string."""
-    return s.strip().lstrip("$").replace(",", "")
+    """Strip $, commas, and whitespace from a numeric string, preserving leading minus sign."""
+    s = s.strip().replace(",", "").replace("$", "")
+    return s
 
 
 def translate_rows(rows, config):
