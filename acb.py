@@ -131,6 +131,7 @@ def compute_acb(rows):
         else:
             raise ValueError(f"Unknown transaction type: {tx_type!r}")
 
+        # TODO: should total_acb be rounded when saving to state?
         state[0], state[1] = shares, total_acb
         yield {
             "date": tx["date"],
@@ -167,7 +168,7 @@ def main():
         with open(args.output, "w", newline="") as f:
             write_csv(output_rows, f)
     elif args.pretty:
-        print(tabulate(output_rows, headers="keys", tablefmt="grid"))
+        print(tabulate(output_rows, headers="keys", tablefmt="grid", floatfmt="s"))
     else:
         write_csv(output_rows, sys.stdout)
 
