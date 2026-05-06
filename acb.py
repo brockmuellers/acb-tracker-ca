@@ -13,6 +13,10 @@ Input columns (header required, order flexible):
     exchange_rate  OPTIONAL foreign-currency-to-CAD rate.
                    Required for non-CAD rows; ignored on CAD rows
                    (always treated as 1).
+    time           OPTIONAL H:MM or HH:MM (e.g. 8:00, 15:30).  Used as a
+                   tiebreaker when the same ticker has multiple transactions
+                   on the same date.  All transactions in such a group must
+                   have a time, or a warning is shown.
 
 A START row declares an opening balance for a ticker — `quantity` is the
 shares already held and `price` is their per-share ACB. A ticker may have
@@ -35,15 +39,29 @@ v1 simplifications (intentional, see plan):
   - ACB is always in CAD; the user supplies the per-row foreign-to-CAD
     exchange rate. There is no FX rate file lookup, no auto-inversion of
     pairs, and no cross-currency chaining.
-  - Same-date tie-break is input file order.
 """
 
 import argparse
 import csv
 import sys
+from datetime import datetime
 from decimal import ROUND_HALF_EVEN, Decimal
 
 from tabulate import tabulate
+
+YELLOW = "\033[33m"
+RESET = "\033[0m"
+
+
+def _normalize_time(s):
+    """Return zero-padded 'HH:MM' for sorting, or '' if s is empty/None."""
+    if not s:
+        return ""
+    try:
+        return datetime.strptime(s, "%H:%M").strftime("%H:%M")
+    except ValueError:
+        raise ValueError(f"invalid time {s!r} — expected H:MM or HH:MM (e.g. 8:00, 15:30)")
+
 
 CENTS = Decimal("0.01")
 ONE = Decimal("1")
@@ -59,6 +77,8 @@ def load_transactions(paths):
     for path in paths:
         with open(path, newline="") as f:
             for row in csv.DictReader(f):
+                ticker = row["ticker"].strip().upper()
+                date = row["date"].strip()
                 currency = ((row.get("currency") or "").strip().upper()
                             or "CAD")
                 rate_raw = (row.get("exchange_rate") or "").strip()
@@ -67,19 +87,24 @@ def load_transactions(paths):
                 else:
                     if not rate_raw:
                         raise ValueError(
-                            f"{row['ticker'].strip().upper()} on "
-                            f"{row['date'].strip()}: non-CAD currency "
+                            f"{ticker} on {date}: non-CAD currency "
                             f"{currency!r} requires an exchange_rate"
                         )
                     exchange_rate = Decimal(rate_raw)
+                time_raw = (row.get("time") or "").strip()
+                try:
+                    time_val = _normalize_time(time_raw)
+                except ValueError as e:
+                    raise ValueError(f"{ticker} on {date}: {e}")
                 rows.append({
-                    "date": row["date"].strip(),
-                    "ticker": row["ticker"].strip().upper(),
+                    "date": date,
+                    "ticker": ticker,
                     "type": row["type"].strip().upper(),
                     "quantity": Decimal(row["quantity"]),
                     "price": Decimal(row["price"]),
                     "currency": currency,
                     "exchange_rate": exchange_rate,
+                    "time": time_val,
                 })
     return rows
 
@@ -90,15 +115,22 @@ def compute_acb(rows):
     Per-ticker state is (shares, total_acb), both Decimal and always CAD.
     """
     holdings = {}  # ticker -> [shares, total_acb]
-    seen_ticker_dates = set()
-    # Stable sort by date; ties keep original input order.
-    ordered = sorted(enumerate(rows), key=lambda p: (p[1]["date"], p[0]))
+    # Sort by date, then time (empty string sorts before any HH:MM), then original input order.
+    ordered = sorted(enumerate(rows), key=lambda p: (p[1]["date"], p[1]["time"], p[0]))
+
+    # Warn once per (ticker, date) group that has multiple transactions but incomplete timestamps.
+    groups: dict[tuple, list] = {}
+    for _, tx in ordered:
+        groups.setdefault((tx["ticker"], tx["date"]), []).append(tx)
+    for (ticker, date), txs in groups.items():
+        if len(txs) > 1 and not all(tx["time"] for tx in txs):
+            print(
+                f"{YELLOW}Warning: multiple transactions for {ticker} on {date} — "
+                f"add a 'time' column to control their order{RESET}",
+                file=sys.stderr, flush=True,
+            )
 
     for _, tx in ordered:
-        key = (tx["ticker"], tx["date"])
-        if key in seen_ticker_dates:
-            print(f"Note: multiple transactions for {tx['ticker']} on {tx['date']}", flush=True)
-        seen_ticker_dates.add(key)
         ticker, tx_type = tx["ticker"], tx["type"]
         qty, price = tx["quantity"], tx["price"]
         currency, rate = tx["currency"], tx["exchange_rate"]

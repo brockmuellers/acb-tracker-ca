@@ -27,6 +27,7 @@ Output goes to stdout unless `-o` is given.
 | `price`         | yes      | per-share price in `currency`, decimal, positive                              |
 | `currency`      | no       | ISO 4217 (default `CAD`)                                                      |
 | `exchange_rate` | no       | foreign-currency-to-CAD rate. Required for non-CAD rows; ignored for CAD rows |
+| `time`          | no       | `H:MM` or `HH:MM` (e.g. `8:00`, `15:30`). Tiebreaker when the same ticker has multiple transactions on the same date. If present, all same-day same-ticker rows must have a time or a warning is shown. |
 
 A `START` row declares an opening balance for a ticker — `quantity` is
 the shares already held, `price` is their per-share ACB. At most one
@@ -85,7 +86,7 @@ Notes:
 ### Sweep transaction types (`sweep_types`)
 
 Some brokers (e.g. Vanguard) store quantity and price in non-standard columns for sweep
-transaction types. For example, Vanguard's "Sweep in" and "Sweep out" rows always show
+transaction types in settlement funds. For example, Vanguard's "Sweep in" and "Sweep out" rows always show
 `Shares=0` — the actual dollar amount is in `Net Amount`.
 
 Use `sweep_types` in the mapping config to redirect quantity and/or price for a set of
@@ -124,9 +125,7 @@ python3 -m pytest test_acb.py test_translate.py -v
 - ACB is always reported in CAD; the user supplies the per-row foreign-to-CAD
   exchange rate. No FX rate file lookup, auto-inversion, or cross-currency
   chaining.
-- Same-date tie-break is input file order.
 - No explicit tracking or verification of current holdings by account.
 - Transaction notes / comments.
 - Row de-duplication.
 - ETF conversion (must be treated as BUY/SELL with manually calculated amounts that correctly transfer cost basis.)
-- Custom ordering of transactions that occurred on the same day.
