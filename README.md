@@ -36,9 +36,9 @@ ticker.
 
 ## Output columns
 
-`date, ticker, type, quantity, price, currency, exchange_rate, price_cad, acb`
+`date, ticker, type, quantity, price, currency, exchange_rate, amount_cad, acb`
 
-- `price_cad = price * exchange_rate` (raw Decimal product, not quantized)
+- `amount_cad = price * quantity * exchange_rate` (total transaction amount in CAD; `price * quantity` is quantized to cents before applying the exchange rate)
 - `acb` is the running ACB **in CAD** after the transaction, quantized
   to cents using banker's rounding
 

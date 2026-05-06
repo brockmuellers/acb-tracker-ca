@@ -25,9 +25,10 @@ chronologically (the run errors clearly otherwise). Mathematically a
 START is identical to a BUY at the same per-share price.
 
 Output columns: date, ticker, type, quantity, price, currency,
-exchange_rate, price_cad, acb
-    `price_cad` is `price * exchange_rate`, the per-share price in CAD
-    used for the ACB math (raw Decimal product, not quantized).
+exchange_rate, amount_cad, acb
+    `amount_cad` is `price * quantity * exchange_rate`, the total transaction
+    amount in CAD used for the ACB math (quantized to cents before CAD
+    conversion).
     `acb` is the running total ACB for that ticker AFTER the transaction,
     always in CAD, quantized to cents using banker's rounding.
 
