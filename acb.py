@@ -49,7 +49,7 @@ CENTS = Decimal("0.01")
 ONE = Decimal("1")
 OUTPUT_COLUMNS = [
     "date", "ticker", "type", "quantity", "price",
-    "currency", "exchange_rate", "price_cad", "acb",
+    "currency", "exchange_rate", "amount_cad", "acb",
 ]
 
 
@@ -102,7 +102,12 @@ def compute_acb(rows):
         ticker, tx_type = tx["ticker"], tx["type"]
         qty, price = tx["quantity"], tx["price"]
         currency, rate = tx["currency"], tx["exchange_rate"]
-        price_cad = price * rate
+        # TODO: double check this, but I think it's most accurate to calculate and round
+        # the "amount" before doing the CAD conversion,since the exact dollar value paid
+        # is more important than the precise share*price.
+        # It may be cleaner to include the rounded amount in the input instead.
+        amount_usd = (price * qty).quantize(CENTS, rounding=ROUND_HALF_EVEN)
+        amount_cad = amount_usd * rate
 
         # A START is only valid as the first appearance of its ticker.
         # This single check covers both ordering ("START came after a
@@ -118,7 +123,7 @@ def compute_acb(rows):
 
         if tx_type in ("START", "BUY"):
             shares += qty
-            total_acb += qty * price_cad
+            total_acb += amount_cad
         elif tx_type == "SELL":
             if qty > shares:
                 raise ValueError(
@@ -141,7 +146,7 @@ def compute_acb(rows):
             "price": price,
             "currency": currency,
             "exchange_rate": rate,
-            "price_cad": price_cad,
+            "amount_cad": amount_cad,
             "acb": total_acb.quantize(CENTS, rounding=ROUND_HALF_EVEN),
         }
 
