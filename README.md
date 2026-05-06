@@ -34,6 +34,9 @@ the shares already held, `price` is their per-share ACB. At most one
 `START` per ticker, and it must come before any `BUY`/`SELL` for that
 ticker.
 
+Dividend reinvestments (DRIP) should be recorded as `BUY` rows at the
+reinvestment price.
+
 ## Output columns
 
 `date, ticker, type, quantity, price, currency, exchange_rate, amount_cad, acb`
