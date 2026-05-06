@@ -149,9 +149,12 @@ def compute_acb(rows):
     for _, tx in ordered:
         groups.setdefault((tx["ticker"], tx["date"]), []).append(tx)
     for (ticker, date), txs in groups.items():
-        if len(txs) > 1 and not all(tx["time"] for tx in txs):
+        types = {tx["type"] for tx in txs}
+        # Only warn when types are mixed (e.g. BUY + SELL): same-type groups
+        # (all BUY or all SELL) are order-independent and don't need timestamps.
+        if len(txs) > 1 and len(types) > 1 and not all(tx["time"] for tx in txs):
             print(
-                f"{YELLOW}Warning: multiple transactions for {ticker} on {date} — "
+                f"{YELLOW}Warning: mixed BUY and SELL transactions for {ticker} on {date} — "
                 f"add a 'time' column to control their order{RESET}",
                 file=sys.stderr, flush=True,
             )
