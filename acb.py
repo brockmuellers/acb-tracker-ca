@@ -68,7 +68,7 @@ CENTS = Decimal("0.01")
 ONE = Decimal("1")
 OUTPUT_COLUMNS = [
     "date", "ticker", "type", "quantity", "price",
-    "currency", "exchange_rate", "amount_cad", "acb",
+    "currency", "exchange_rate", "amount_cad", "acb_cad", "gain_loss_cad",
 ]
 
 
@@ -154,6 +154,7 @@ def compute_acb(rows):
         state = holdings.setdefault(ticker, [Decimal(0), Decimal(0)])
         shares, total_acb = state
 
+        gain_loss = ""
         if tx_type in ("START", "BUY"):
             shares += qty
             total_acb += amount_cad
@@ -164,8 +165,10 @@ def compute_acb(rows):
                 )
             # CRA average-cost rule: per-share ACB unchanged by a sell.
             acb_per_share = total_acb / shares
-            total_acb -= qty * acb_per_share
+            acb_of_sold = qty * acb_per_share
+            total_acb -= acb_of_sold
             shares -= qty
+            gain_loss = (amount_cad - acb_of_sold).quantize(CENTS, rounding=ROUND_HALF_EVEN)
         else:
             raise ValueError(f"Unknown transaction type: {tx_type!r}")
 
@@ -180,7 +183,8 @@ def compute_acb(rows):
             "currency": currency,
             "exchange_rate": rate,
             "amount_cad": amount_cad,
-            "acb": total_acb.quantize(CENTS, rounding=ROUND_HALF_EVEN),
+            "acb_cad": total_acb.quantize(CENTS, rounding=ROUND_HALF_EVEN),
+            "gain_loss_cad": gain_loss,
         }
 
 

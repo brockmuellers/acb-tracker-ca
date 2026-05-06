@@ -39,11 +39,11 @@ reinvestment price.
 
 ## Output columns
 
-`date, ticker, type, quantity, price, currency, exchange_rate, amount_cad, acb`
+`date, ticker, type, quantity, price, currency, exchange_rate, amount_cad, acb_cad, gain_loss_cad`
 
 - `amount_cad = price * quantity * exchange_rate` (total transaction amount in CAD; `price * quantity` is quantized to cents before applying the exchange rate)
-- `acb` is the running ACB **in CAD** after the transaction, quantized
-  to cents using banker's rounding
+- `acb_cad` is the running ACB **in CAD** after the transaction, quantized to cents using banker's rounding
+- `gain_loss_cad` is the realized capital gain or loss in CAD for `SELL` transactions (`amount_cad` minus the ACB of the shares sold), quantized to cents. Empty for `BUY` and `START` rows.
 
 ## Translating brokerage exports
 
