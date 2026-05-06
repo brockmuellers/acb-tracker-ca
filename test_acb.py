@@ -12,7 +12,8 @@ from acb import compute_acb, load_transactions
 REPO = Path(__file__).parent
 
 
-def tx(date, ticker, tx_type, quantity, price, currency="CAD", exchange_rate="1"):
+def tx(date, ticker, tx_type, quantity, price, currency="CAD", exchange_rate="1",
+       superficial_qty=None):
     """Build a normalized transaction dict, as load_transactions would."""
     return {
         "date": date,
@@ -22,12 +23,14 @@ def tx(date, ticker, tx_type, quantity, price, currency="CAD", exchange_rate="1"
         "price": Decimal(str(price)),
         "currency": currency,
         "exchange_rate": Decimal(str(exchange_rate)),
+        "time": "",
+        "superficial_qty": Decimal(str(superficial_qty)) if superficial_qty is not None else None,
     }
 
 
 def acbs(rows):
     """Return just the running acb column from compute_acb output."""
-    return [r["acb"] for r in compute_acb(rows)]
+    return [r["acb_cad"] for r in compute_acb(rows)]
 
 
 def test_single_ticker_matches_hand_calculation():
@@ -55,8 +58,8 @@ def test_multi_ticker_independence():
         tx("2024-07-01", "XEQT", "SELL", 150, "32.00"),
     ]
     out = list(compute_acb(rows))
-    vfv = [r["acb"] for r in out if r["ticker"] == "VFV"]
-    xeqt = [r["acb"] for r in out if r["ticker"] == "XEQT"]
+    vfv = [r["acb_cad"] for r in out if r["ticker"] == "VFV"]
+    xeqt = [r["acb_cad"] for r in out if r["ticker"] == "XEQT"]
     assert vfv == [Decimal("9850.00"), Decimal("14950.00"), Decimal("7475.00")]
     assert xeqt == [Decimal("5600.00"), Decimal("8600.00"), Decimal("4300.00")]
 
@@ -105,7 +108,7 @@ def test_input_is_reordered_chronologically():
     ]
     out = list(compute_acb(rows))
     assert [r["date"] for r in out] == ["2024-01-15", "2024-03-10", "2024-06-20"]
-    assert [r["acb"] for r in out] == [
+    assert [r["acb_cad"] for r in out] == [
         Decimal("9850.00"),
         Decimal("14950.00"),
         Decimal("7475.00"),
@@ -121,10 +124,10 @@ def test_cli_end_to_end_on_sample_fixture(tmp_path):
     )
     # read_text() normalizes \r\n → \n; that's fine for content equality.
     assert out_path.read_text() == (
-        "date,ticker,type,quantity,price,currency,exchange_rate,price_cad,acb\n"
-        "2024-01-15,VFV,BUY,100,98.50,CAD,1,98.50,9850.00\n"
-        "2024-03-10,VFV,BUY,50,102.00,CAD,1,102.00,14950.00\n"
-        "2024-06-20,VFV,SELL,75,110.00,CAD,1,110.00,7475.00\n"
+        "date,ticker,type,quantity,price,currency,exchange_rate,amount_cad,acb_cad,gain_loss_cad,superficial_loss_cad\n"
+        "2024-01-15,VFV,BUY,100,98.50,CAD,1,9850.00,9850.00,,\n"
+        "2024-03-10,VFV,BUY,50,102.00,CAD,1,5100.00,14950.00,,\n"
+        "2024-06-20,VFV,SELL,75,110.00,CAD,1,8250.00,7475.00,775.00,\n"
     )
 
 
@@ -179,8 +182,8 @@ def test_starts_for_different_tickers_are_independent():
         tx("2024-03-10", "VFV", "BUY", 50, "102.00"),
     ]
     out = list(compute_acb(rows))
-    vfv = [r["acb"] for r in out if r["ticker"] == "VFV"]
-    xeqt = [r["acb"] for r in out if r["ticker"] == "XEQT"]
+    vfv = [r["acb_cad"] for r in out if r["ticker"] == "VFV"]
+    xeqt = [r["acb_cad"] for r in out if r["ticker"] == "XEQT"]
     assert vfv == [Decimal("9500.00"), Decimal("14600.00")]
     assert xeqt == [Decimal("5500.00")]
 
@@ -195,10 +198,10 @@ def test_cli_end_to_end_on_opening_balance_fixture(tmp_path):
         check=True,
     )
     assert out_path.read_text() == (
-        "date,ticker,type,quantity,price,currency,exchange_rate,price_cad,acb\n"
-        "2023-12-31,VFV,START,100,95.00,CAD,1,95.00,9500.00\n"
-        "2024-03-10,VFV,BUY,50,102.00,CAD,1,102.00,14600.00\n"
-        "2024-06-20,VFV,SELL,75,110.00,CAD,1,110.00,7300.00\n"
+        "date,ticker,type,quantity,price,currency,exchange_rate,amount_cad,acb_cad,gain_loss_cad,superficial_loss_cad\n"
+        "2023-12-31,VFV,START,100,95.00,CAD,1,9500.00,9500.00,,\n"
+        "2024-03-10,VFV,BUY,50,102.00,CAD,1,5100.00,14600.00,,\n"
+        "2024-06-20,VFV,SELL,75,110.00,CAD,1,8250.00,7300.00,950.00,\n"
     )
 
 
@@ -277,8 +280,8 @@ def test_mixed_currency_acb_independent_per_ticker():
            currency="USD", exchange_rate="1.4603"),     # +1387.285 → 3982.525
     ]
     out = list(compute_acb(rows))
-    aapl = [r["acb"] for r in out if r["ticker"] == "AAPL"]
-    vfv = [r["acb"] for r in out if r["ticker"] == "VFV"]
+    aapl = [r["acb_cad"] for r in out if r["ticker"] == "AAPL"]
+    vfv = [r["acb_cad"] for r in out if r["ticker"] == "VFV"]
     # Second AAPL: 5 * 190 * 1.4603 = 1387.285 → total 3982.525 →
     # banker's-rounds to 3982.52 (digit before .525 is 2, even).
     assert aapl == [Decimal("2595.24"), Decimal("3982.52")]
@@ -296,7 +299,7 @@ def test_cli_end_to_end_with_currency_columns(tmp_path):
     )
     # Blank currency/exchange_rate in input get normalized to CAD/1 in output.
     assert out_path.read_text() == (
-        "date,ticker,type,quantity,price,currency,exchange_rate,price_cad,acb\n"
-        "2025-01-02,AAPL,BUY,10,180.00,USD,1.4418,259.524000,2595.24\n"
-        "2025-01-15,VFV,BUY,100,98.50,CAD,1,98.50,9850.00\n"
+        "date,ticker,type,quantity,price,currency,exchange_rate,amount_cad,acb_cad,gain_loss_cad,superficial_loss_cad\n"
+        "2025-01-02,AAPL,BUY,10,180.00,USD,1.4418,2595.240000,2595.24,,\n"
+        "2025-01-15,VFV,BUY,100,98.50,CAD,1,9850.00,9850.00,,\n"
     )

@@ -26,8 +26,9 @@ Output goes to stdout unless `-o` is given.
 | `quantity`      | yes      | decimal, positive                                                             |
 | `price`         | yes      | per-share price in `currency`, decimal, positive                              |
 | `currency`      | no       | ISO 4217 (default `CAD`)                                                      |
-| `exchange_rate` | no       | foreign-currency-to-CAD rate. Required for non-CAD rows; ignored for CAD rows |
-| `time`          | no       | `H:MM` or `HH:MM` (e.g. `8:00`, `15:30`). Tiebreaker when the same ticker has multiple transactions on the same date. If present, all same-day same-ticker rows must have a time or a warning is shown. |
+| `exchange_rate`     | no       | foreign-currency-to-CAD rate. Required for non-CAD rows; ignored for CAD rows |
+| `time`              | no       | `H:MM` or `HH:MM` (e.g. `8:00`, `15:30`). Tiebreaker when the same ticker has multiple transactions on the same date. Accuracy is not important; this is only used for ordering. |
+| `superficial_qty`   | no       | Decimal >= 0. Number of shares whose loss is denied under the CRA superficial loss rule (shares repurchased within 30 days before/after this `SELL`). The denied loss is added back to the remaining ACB pool. Set to `0` to confirm no superficial loss and silence the warning. Absent/empty on a loss-generating `SELL` triggers a warning. Only valid on `SELL` rows that realize a loss. |
 
 A `START` row declares an opening balance for a ticker — `quantity` is
 the shares already held, `price` is their per-share ACB. At most one
@@ -39,11 +40,12 @@ reinvestment price.
 
 ## Output columns
 
-`date, ticker, type, quantity, price, currency, exchange_rate, amount_cad, acb_cad, gain_loss_cad`
+`date, ticker, type, quantity, price, currency, exchange_rate, amount_cad, acb_cad, gain_loss_cad, superficial_loss_cad`
 
 - `amount_cad = price * quantity * exchange_rate` (total transaction amount in CAD; `price * quantity` is quantized to cents before applying the exchange rate)
 - `acb_cad` is the running ACB **in CAD** after the transaction, quantized to cents using banker's rounding
-- `gain_loss_cad` is the realized capital gain or loss in CAD for `SELL` transactions (`amount_cad` minus the ACB of the shares sold), quantized to cents. Empty for `BUY` and `START` rows.
+- `gain_loss_cad` is the realized (non-denied) capital gain or loss in CAD for `SELL` transactions, quantized to cents. Zero for a fully superficial loss. Empty for `BUY` and `START` rows.
+- `superficial_loss_cad` is the denied loss amount in CAD for `SELL` rows where `superficial_qty > 0`, quantized to cents. Empty otherwise.
 
 ## Translating brokerage exports
 
@@ -123,7 +125,7 @@ python3 -m pytest test_acb.py test_translate.py -v
 
 - No commissions / outlays.
 - Only `START`, `BUY`, and `SELL` (no DRIP, ROC, splits, phantom distributions).
-- No superficial-loss rule.
+- Superficial loss rule is user-directed via `superficial_qty`; automatic 30-day window detection is not supported (CRA affiliated-person rules make this impossible to determine from a single account's CSV).
 - No zero-floor handling; over-selling raises a clear error.
 - ACB is always reported in CAD; the user supplies the per-row foreign-to-CAD
   exchange rate. No FX rate file lookup, auto-inversion, or cross-currency

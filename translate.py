@@ -55,7 +55,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-ACB_INPUT_COLUMNS = ["date", "ticker", "type", "quantity", "price", "currency", "exchange_rate", "time"]
+ACB_INPUT_COLUMNS = ["date", "ticker", "type", "quantity", "price", "currency", "exchange_rate", "time", "superficial_qty"]
 REQUIRED_COLUMNS = ["date", "ticker", "type", "quantity", "price"]
 FX_COL_RE = re.compile(r"^FX([A-Z]{3})CAD$")
 

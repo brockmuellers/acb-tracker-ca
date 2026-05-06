@@ -13,10 +13,18 @@ Input columns (header required, order flexible):
     exchange_rate  OPTIONAL foreign-currency-to-CAD rate.
                    Required for non-CAD rows; ignored on CAD rows
                    (always treated as 1).
-    time           OPTIONAL H:MM or HH:MM (e.g. 8:00, 15:30).  Used as a
-                   tiebreaker when the same ticker has multiple transactions
-                   on the same date.  All transactions in such a group must
-                   have a time, or a warning is shown.
+    time              OPTIONAL H:MM or HH:MM (e.g. 8:00, 15:30).  Used as a
+                      tiebreaker when the same ticker has multiple transactions
+                      on the same date.  All transactions in such a group must
+                      have a time, or a warning is shown.
+    superficial_qty   OPTIONAL decimal >= 0.  Number of shares whose loss is
+                      denied under the CRA superficial loss rule (i.e. shares
+                      repurchased within 30 days before/after this SELL).
+                      The denied loss is added back to the remaining ACB pool
+                      so it defers into future per-share cost.  Set to 0 to
+                      explicitly confirm no superficial loss and silence the
+                      warning.  Absent: a warning is printed for any SELL that
+                      realizes a loss.  Only valid on SELL rows with a loss.
 
 A START row declares an opening balance for a ticker — `quantity` is the
 shares already held and `price` is their per-share ACB. A ticker may have
@@ -25,17 +33,23 @@ chronologically (the run errors clearly otherwise). Mathematically a
 START is identical to a BUY at the same per-share price.
 
 Output columns: date, ticker, type, quantity, price, currency,
-exchange_rate, amount_cad, acb
+exchange_rate, amount_cad, acb_cad, gain_loss_cad, superficial_loss_cad
     `amount_cad` is `price * quantity * exchange_rate`, the total transaction
     amount in CAD used for the ACB math (quantized to cents before CAD
     conversion).
-    `acb` is the running total ACB for that ticker AFTER the transaction,
+    `acb_cad` is the running total ACB for that ticker AFTER the transaction,
     always in CAD, quantized to cents using banker's rounding.
+    `gain_loss_cad` is the realized (non-denied) capital gain or loss on SELL
+    rows, in CAD, quantized to cents.  Zero for a fully superficial loss.
+    `superficial_loss_cad` is the denied loss amount for rows where
+    superficial_qty > 0, in CAD, quantized to cents.  Empty otherwise.
 
 v1 simplifications (intentional, see plan):
   - No commissions / outlays.
   - Only START, BUY, and SELL (no DRIP, ROC, splits, phantom distributions).
-  - No superficial-loss rule.
+  - Superficial loss rule is user-directed via superficial_qty; automatic
+    30-day window detection is not supported (CRA affiliated-person rules
+    make this impossible to determine from a single account's CSV).
   - No zero-floor handling; over-selling raises a clear ValueError.
   - ACB is always in CAD; the user supplies the per-row foreign-to-CAD
     exchange rate. There is no FX rate file lookup, no auto-inversion of
@@ -68,7 +82,7 @@ CENTS = Decimal("0.01")
 ONE = Decimal("1")
 OUTPUT_COLUMNS = [
     "date", "ticker", "type", "quantity", "price",
-    "currency", "exchange_rate", "amount_cad", "acb_cad", "gain_loss_cad",
+    "currency", "exchange_rate", "amount_cad", "acb_cad", "gain_loss_cad", "superficial_loss_cad",
 ]
 
 
@@ -97,6 +111,16 @@ def load_transactions(paths):
                     time_val = _normalize_time(time_raw)
                 except ValueError as e:
                     raise ValueError(f"{ticker} on {date}: {e}")
+                sq_raw = (row.get("superficial_qty") or "").strip()
+                if sq_raw:
+                    sq = Decimal(sq_raw)
+                    if sq < 0:
+                        raise ValueError(
+                            f"{ticker} on {date}: superficial_qty must be >= 0 (got {sq})"
+                        )
+                    superficial_qty = sq
+                else:
+                    superficial_qty = None
                 rows.append({
                     "date": date,
                     "ticker": ticker,
@@ -106,6 +130,7 @@ def load_transactions(paths):
                     "currency": currency,
                     "exchange_rate": exchange_rate,
                     "time": time_val,
+                    "superficial_qty": superficial_qty,
                 })
     return rows
 
@@ -155,6 +180,7 @@ def compute_acb(rows):
         shares, total_acb = state
 
         gain_loss = ""
+        superficial_loss = ""
         if tx_type in ("START", "BUY"):
             shares += qty
             total_acb += amount_cad
@@ -168,7 +194,35 @@ def compute_acb(rows):
             acb_of_sold = qty * acb_per_share
             total_acb -= acb_of_sold
             shares -= qty
-            gain_loss = (amount_cad - acb_of_sold).quantize(CENTS, rounding=ROUND_HALF_EVEN)
+            raw_gain_loss = amount_cad - acb_of_sold
+
+            s_qty = tx["superficial_qty"]
+            if s_qty is not None and s_qty > 0:
+                if raw_gain_loss >= 0:
+                    raise ValueError(
+                        f"superficial_qty set for {ticker} on {tx['date']} but the sale is not a loss"
+                    )
+                if s_qty > qty:
+                    raise ValueError(
+                        f"superficial_qty {s_qty} exceeds quantity sold {qty} "
+                        f"for {ticker} on {tx['date']}"
+                    )
+                # Denied loss: the proportional loss on the superficial shares.
+                # Added back to total_acb so it defers into future per-share cost.
+                denied = s_qty * (acb_per_share - amount_cad / qty)
+                total_acb += denied
+                superficial_loss = denied.quantize(CENTS, rounding=ROUND_HALF_EVEN)
+                gain_loss = (raw_gain_loss + denied).quantize(CENTS, rounding=ROUND_HALF_EVEN)
+            else:
+                gain_loss = raw_gain_loss.quantize(CENTS, rounding=ROUND_HALF_EVEN)
+                if s_qty is None and gain_loss < 0:
+                    print(
+                        f"{YELLOW}Warning: SELL of {ticker} on {tx['date']} realized a loss of "
+                        f"{gain_loss}. If you or an affiliated person bought the same security "
+                        f"within 30 days before or after this sale, set superficial_qty to the "
+                        f"number of shares repurchased. Set to 0 to confirm no superficial loss.{RESET}",
+                        file=sys.stderr, flush=True,
+                    )
         else:
             raise ValueError(f"Unknown transaction type: {tx_type!r}")
 
@@ -185,6 +239,7 @@ def compute_acb(rows):
             "amount_cad": amount_cad,
             "acb_cad": total_acb.quantize(CENTS, rounding=ROUND_HALF_EVEN),
             "gain_loss_cad": gain_loss,
+            "superficial_loss_cad": superficial_loss,
         }
 
 

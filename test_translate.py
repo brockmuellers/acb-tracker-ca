@@ -413,10 +413,10 @@ def test_cli_output_pipes_into_acb(tmp_path):
         check=True,
     )
     assert acb_out.read_text() == (
-        "date,ticker,type,quantity,price,currency,exchange_rate,price_cad,acb\n"
-        "2024-01-15,VFV,BUY,100,98.50,CAD,1,98.50,9850.00\n"
-        "2024-03-10,VFV,BUY,50,102.00,CAD,1,102.00,14950.00\n"
-        "2024-06-20,VFV,SELL,75,110.00,CAD,1,110.00,7475.00\n"
+        "date,ticker,type,quantity,price,currency,exchange_rate,amount_cad,acb_cad,gain_loss_cad,superficial_loss_cad\n"
+        "2024-01-15,VFV,BUY,100,98.50,CAD,1,9850.00,9850.00,,\n"
+        "2024-03-10,VFV,BUY,50,102.00,CAD,1,5100.00,14950.00,,\n"
+        "2024-06-20,VFV,SELL,75,110.00,CAD,1,8250.00,7475.00,775.00,\n"
     )
 
 
