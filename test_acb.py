@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from acb import compute_acb, load_transactions
+from acb_lib import compute_acb, load_transactions
 
 REPO = Path(__file__).parent
 

@@ -8,7 +8,7 @@ import yaml
 
 import pytest
 
-from translate import (
+from translate_lib import (
     AppConfig,
     apply_fx_rates,
     clean_number,
