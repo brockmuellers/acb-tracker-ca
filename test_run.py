@@ -233,8 +233,9 @@ def test_cli_date_filter_start(tmp_path):
     simple_mapping(tmp_path)
     out = tmp_path / "out.csv"
     write_config(tmp_path / "run.yaml", {
-        "sources": [{"input": "trades.csv", "mapping": "mapping.yaml", "start": "2024-03-01"}],
+        "sources": [{"input": "trades.csv", "mapping": "mapping.yaml"}],
         "output": "out.csv",
+        "start": "2024-03-01",
     })
     subprocess.run(
         [sys.executable, str(REPO / "run.py"), str(tmp_path / "run.yaml")],
@@ -251,8 +252,9 @@ def test_cli_date_filter_end(tmp_path):
     simple_mapping(tmp_path)
     out = tmp_path / "out.csv"
     write_config(tmp_path / "run.yaml", {
-        "sources": [{"input": "trades.csv", "mapping": "mapping.yaml", "end": "2024-03-31"}],
+        "sources": [{"input": "trades.csv", "mapping": "mapping.yaml"}],
         "output": "out.csv",
+        "end": "2024-03-31",
     })
     subprocess.run(
         [sys.executable, str(REPO / "run.py"), str(tmp_path / "run.yaml")],

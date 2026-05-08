@@ -7,6 +7,8 @@ The config file specifies brokerage sources to translate and combine:
 
     fx_dir: fx_rates/              # optional — directory of Bank of Canada FX CSVs
     output: output/combined.csv    # optional — output path (relative to config file)
+    start: 2025-01-01              # optional — exclude rows before this date (inclusive)
+    end: 2025-12-31                # optional — exclude rows after this date (inclusive)
 
     sources:
       - input: exports/starting.csv
@@ -14,12 +16,9 @@ The config file specifies brokerage sources to translate and combine:
 
       - input: exports/vanguard/*.csv
         mapping: mappings/vanguard.yaml
-        start: 2025-01-01
-        end: 2025-12-31
 
       - input: exports/schwab/*.csv
         mapping: mappings/schwab.yaml
-        start: 2025-01-01
 
 All paths are relative to the config file's directory.
 Sources are processed in order; glob patterns are expanded alphabetically.
@@ -43,8 +42,8 @@ from translate_lib import (
     translate_file,
 )
 
-_VALID_RUN_KEYS = frozenset({"sources", "output", "fx_dir"})
-_VALID_SOURCE_KEYS = frozenset({"input", "mapping", "start", "end"})
+_VALID_RUN_KEYS = frozenset({"sources", "output", "fx_dir", "start", "end"})
+_VALID_SOURCE_KEYS = frozenset({"input", "mapping"})
 
 
 def load_run_config(config_path):
@@ -125,6 +124,10 @@ def main():
             print(f"Exchange rate error: {e}", file=sys.stderr)
             sys.exit(1)
 
+    # YAML parses bare dates (2025-01-01) as datetime.date; convert to ISO string.
+    start = str(run_config["start"]) if run_config.get("start") is not None else None
+    end = str(run_config["end"]) if run_config.get("end") is not None else None
+
     all_translated = []
     for i, src in enumerate(run_config["sources"]):
         try:
@@ -134,9 +137,6 @@ def main():
             sys.exit(1)
 
         mapping_path = str(_resolve(base_dir, src["mapping"]))
-        # YAML parses bare dates (2025-01-01) as datetime.date; convert to ISO string.
-        start = str(src["start"]) if src.get("start") is not None else None
-        end = str(src["end"]) if src.get("end") is not None else None
 
         for input_path in input_paths:
             try:
