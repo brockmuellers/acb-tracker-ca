@@ -121,13 +121,13 @@ def compute_acb(rows):
         amount_usd = (price * qty).quantize(CENTS, rounding=ROUND_HALF_EVEN)
         amount_cad = amount_usd * rate
 
-        # A START is only valid as the first appearance of its ticker.
-        # This single check covers both ordering ("START came after a
-        # BUY/SELL") and uniqueness ("two STARTs for one ticker").
+        # Warn if a START appears after other transactions for the same ticker.
+        # Multiple accounts may legitimately hold the same ticker with separate START rows.
         if tx_type == "START" and ticker in holdings:
-            raise ValueError(
-                f"START for {ticker} on {tx['date']} must precede "
-                f"other transactions for that ticker"
+            print(
+                f"{YELLOW}Warning: START for {ticker} on {tx['date']} follows other "
+                f"transactions for that ticker — verify row ordering is correct{RESET}",
+                file=sys.stderr, flush=True,
             )
 
         state = holdings.setdefault(ticker, [Decimal(0), Decimal(0)])

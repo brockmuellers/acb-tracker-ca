@@ -157,22 +157,24 @@ def test_start_then_sell_uses_opening_acb():
     assert acbs(rows) == [Decimal("9500.00"), Decimal("5700.00")]
 
 
-def test_start_after_buy_for_same_ticker_raises():
+def test_start_after_buy_for_same_ticker_warns(capsys):
     rows = [
         tx("2024-01-15", "VFV", "BUY", 100, "98.50"),
         tx("2024-06-20", "VFV", "START", 50, "95.00"),
     ]
-    with pytest.raises(ValueError, match="START for VFV on 2024-06-20 must precede"):
-        list(compute_acb(rows))
+    result = list(compute_acb(rows))
+    assert len(result) == 2
+    assert "Warning" in capsys.readouterr().err
 
 
-def test_two_starts_for_same_ticker_raises():
+def test_two_starts_for_same_ticker_warns(capsys):
     rows = [
         tx("2023-12-31", "VFV", "START", 100, "95.00"),
         tx("2024-01-01", "VFV", "START", 50, "100.00"),
     ]
-    with pytest.raises(ValueError, match="START for VFV on 2024-01-01 must precede"):
-        list(compute_acb(rows))
+    result = list(compute_acb(rows))
+    assert len(result) == 2
+    assert "Warning" in capsys.readouterr().err
 
 
 def test_starts_for_different_tickers_are_independent():
