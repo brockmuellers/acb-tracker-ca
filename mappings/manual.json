@@ -5,7 +5,8 @@
         "Transaction Type": "type",
         "Shares":          "quantity",
         "Share Price":     "price",
-        "Currency":        "currency"
+        "Currency":        "currency",
+        "Superficial Qty": "superficial_qty"
     },
     "type_map": {
         "Start":        "START",

@@ -4,7 +4,8 @@
         "Symbol":          "ticker",
         "Transaction Type": "type",
         "Shares":          "quantity",
-        "Share Price":     "price"
+        "Share Price":     "price",
+        "Superficial Qty": "superficial_qty"
     },
     "type_map": {
         "Buy":          "BUY",

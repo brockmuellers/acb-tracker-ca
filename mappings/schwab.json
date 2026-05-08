@@ -4,7 +4,8 @@
         "Symbol":     "ticker",
         "Action":     "type",
         "Quantity":     "quantity",
-        "Price":  "price"
+        "Price":  "price",
+        "Time": "time"
     },
     "type_map": {
         "Buy":  "BUY",
