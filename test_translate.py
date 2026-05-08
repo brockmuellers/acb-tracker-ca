@@ -1,9 +1,10 @@
 """Tests for translate.py."""
 
-import json
 import subprocess
 import sys
 from pathlib import Path
+
+import yaml
 
 import pytest
 
@@ -208,8 +209,8 @@ def test_cli_start_flag_filters_rows(tmp_path):
         "2024-03-10,VFV,BUY,50,102.00\n"
         "2024-06-20,VFV,SELL,75,110.00\n"
     )
-    cfg = tmp_path / "map.json"
-    cfg.write_text(json.dumps(BASE_CONFIG))
+    cfg = tmp_path / "map.yaml"
+    cfg.write_text(yaml.dump(BASE_CONFIG))
     out = tmp_path / "out.csv"
     subprocess.run(
         [sys.executable, str(REPO / "translate.py"), str(src), str(cfg),
@@ -231,8 +232,8 @@ def test_cli_end_flag_filters_rows(tmp_path):
         "2024-03-10,VFV,BUY,50,102.00\n"
         "2024-06-20,VFV,SELL,75,110.00\n"
     )
-    cfg = tmp_path / "map.json"
-    cfg.write_text(json.dumps(BASE_CONFIG))
+    cfg = tmp_path / "map.yaml"
+    cfg.write_text(yaml.dump(BASE_CONFIG))
     out = tmp_path / "out.csv"
     subprocess.run(
         [sys.executable, str(REPO / "translate.py"), str(src), str(cfg),
@@ -254,8 +255,8 @@ def test_cli_start_and_end_flags_together(tmp_path):
         "2024-03-10,VFV,BUY,50,102.00\n"
         "2024-06-20,VFV,SELL,75,110.00\n"
     )
-    cfg = tmp_path / "map.json"
-    cfg.write_text(json.dumps(BASE_CONFIG))
+    cfg = tmp_path / "map.yaml"
+    cfg.write_text(yaml.dump(BASE_CONFIG))
     out = tmp_path / "out.csv"
     subprocess.run(
         [sys.executable, str(REPO / "translate.py"), str(src), str(cfg),
@@ -300,15 +301,15 @@ def test_validate_empty_input_returns_empty():
 # --- load_config ---
 
 def test_load_config_raises_without_column_map(tmp_path):
-    cfg = tmp_path / "bad.json"
-    cfg.write_text(json.dumps({"type_map": {"Buy": "BUY"}}))
+    cfg = tmp_path / "bad.yaml"
+    cfg.write_text(yaml.dump({"type_map": {"Buy": "BUY"}}))
     with pytest.raises(ValueError, match="column_map"):
         load_config(str(cfg))
 
 
 def test_load_config_raises_with_empty_column_map(tmp_path):
-    cfg = tmp_path / "bad.json"
-    cfg.write_text(json.dumps({"column_map": {}}))
+    cfg = tmp_path / "bad.yaml"
+    cfg.write_text(yaml.dump({"column_map": {}}))
     with pytest.raises(ValueError, match="column_map"):
         load_config(str(cfg))
 
@@ -322,8 +323,8 @@ def test_cli_basic_translation(tmp_path):
         "2024-01-15,VFV,BUY,100,98.50,ignored\n"
         "2024-03-10,VFV,BUY,50,102.00,ignored\n"
     )
-    cfg = tmp_path / "map.json"
-    cfg.write_text(json.dumps(BASE_CONFIG))
+    cfg = tmp_path / "map.yaml"
+    cfg.write_text(yaml.dump(BASE_CONFIG))
     out = tmp_path / "out.csv"
     subprocess.run(
         [sys.executable, str(REPO / "translate.py"), str(src), str(cfg), "-o", str(out)],
@@ -353,8 +354,8 @@ def test_cli_with_type_map_and_date_format(tmp_path):
         "type_map": {"Buy": "BUY", "Sell": "SELL"},
         "date_format": "%m/%d/%Y",
     }
-    cfg = tmp_path / "map.json"
-    cfg.write_text(json.dumps(config))
+    cfg = tmp_path / "map.yaml"
+    cfg.write_text(yaml.dump(config))
     out = tmp_path / "out.csv"
     subprocess.run(
         [sys.executable, str(REPO / "translate.py"), str(src), str(cfg), "-o", str(out)],
@@ -380,7 +381,7 @@ def test_cli_wealthsimple_fixture(tmp_path):
     out = tmp_path / "out.csv"
     subprocess.run(
         [sys.executable, str(REPO / "translate.py"),
-         str(src), str(REPO / "mappings" / "wealthsimple.json"),
+         str(src), str(REPO / "mappings" / "wealthsimple.yaml"),
          "-o", str(out)],
         check=True,
     )
@@ -400,8 +401,8 @@ def test_cli_output_pipes_into_acb(tmp_path):
         "2024-03-10,VFV,BUY,50,102.00\n"
         "2024-06-20,VFV,SELL,75,110.00\n"
     )
-    cfg = tmp_path / "map.json"
-    cfg.write_text(json.dumps(BASE_CONFIG))
+    cfg = tmp_path / "map.yaml"
+    cfg.write_text(yaml.dump(BASE_CONFIG))
     translated = tmp_path / "translated.csv"
     subprocess.run(
         [sys.executable, str(REPO / "translate.py"), str(src), str(cfg), "-o", str(translated)],
@@ -607,8 +608,8 @@ def test_cli_fx_dir_populates_exchange_rate(tmp_path):
             "Currency": "currency",
         }
     }
-    cfg = tmp_path / "map.json"
-    cfg.write_text(json.dumps(config))
+    cfg = tmp_path / "map.yaml"
+    cfg.write_text(yaml.dump(config))
     fx_dir = tmp_path / "fx"
     fx_dir.mkdir()
     _write_fx_csv(fx_dir / "usd.csv", "FXUSDCAD", [

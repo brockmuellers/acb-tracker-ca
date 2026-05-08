@@ -7,32 +7,35 @@ Usage:
 
 If -o is omitted the output goes to temp/<input_stem>_translated.csv.
 
-The mapping config is a JSON file with the following schema:
+The mapping config is a YAML file with the following schema:
 
-    {
-        "column_map": {           // REQUIRED — broker column name → acb column name
-            "Trade Date": "date",
-            "Ticker":     "ticker",
-            "Action":     "type",
-            "Shares":     "quantity",
-            "Price ($)":  "price",
-            "Currency":   "currency"
-        },
-        "type_map": {             // optional — remap broker type values to BUY/SELL/START
-            "Buy":  "BUY",
-            "Sell": "SELL"
-        },
-        "skip_types": ["Dividend", "Reinvestment"], // optional — broker type values to drop
-        "date_format": "%m/%d/%Y", // optional — strptime format; omit if already ISO 8601
-        "defaults": {              // optional — static values for missing or empty columns
-            "currency": "CAD"
-        },
-        "sweep_types": {           // optional — broker sweep fund transaction types whose quantity/price live in alternate columns
-            "types":          ["Sweep in", "Sweep out"],
-            "quantity_col":   "Net Amount",  // broker column to read quantity from (sign stripped)
-            "price_override": "1.0"          // literal price string (omit to use mapped price column)
-        }
-    }
+    column_map:               # REQUIRED — broker column name → acb column name
+      Trade Date: date
+      Ticker: ticker
+      Action: type
+      Shares: quantity
+      Price ($): price
+      Currency: currency
+
+    type_map:                 # optional — remap broker type values to BUY/SELL/START
+      Buy: BUY
+      Sell: SELL
+
+    skip_types:               # optional — broker type values to drop
+      - Dividend
+      - Reinvestment
+
+    date_format: "%m/%d/%Y"   # optional — strptime format; omit if already ISO 8601
+
+    defaults:                 # optional — static values for missing or empty columns
+      currency: CAD
+
+    sweep_types:              # optional — broker sweep fund types whose quantity/price live in alternate columns
+      types:
+        - Sweep in
+        - Sweep out
+      quantity_col: Net Amount  # broker column to read quantity from (sign stripped)
+      price_override: "1.0"    # literal price (omit to use mapped price column)
 
 Only columns listed in column_map are kept; all other broker columns are dropped.
 Required acb.py input columns: date, ticker, type, quantity, price.
@@ -48,9 +51,10 @@ Exchange rates (--fx-dir):
 
 import argparse
 import csv
-import json
 import re
 import sys
+
+import yaml
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -93,10 +97,14 @@ class SweepConfig:
         if not isinstance(types, list) or not types or not all(isinstance(x, str) for x in types):
             raise ConfigurationError(f"{config_path}: sweep_types.'types' must be a non-empty list of strings")
         for key in ("quantity_col", "price_override"):
-            if key in data and not isinstance(data[key], str):
-                raise ConfigurationError(
-                    f"{config_path}: sweep_types.'{key}' must be a string (got {type(data[key]).__name__})"
-                )
+            if key in data:
+                val = data[key]
+                if isinstance(val, (int, float)):
+                    data[key] = str(val)
+                elif not isinstance(val, str):
+                    raise ConfigurationError(
+                        f"{config_path}: sweep_types.'{key}' must be a string (got {type(val).__name__})"
+                    )
         return cls(
             types=set(types),
             quantity_col=data.get("quantity_col"),
@@ -185,9 +193,9 @@ class AppConfig:
 
 def load_config(config_path: str) -> AppConfig:
     with open(config_path) as f:
-        data = json.load(f)
+        data = yaml.safe_load(f)
     if not isinstance(data, dict):
-        raise ConfigurationError(f"{config_path}: mapping config must be a JSON object")
+        raise ConfigurationError(f"{config_path}: mapping config must be a YAML mapping")
     return AppConfig.from_dict(data, config_path)
 
 
@@ -406,7 +414,7 @@ def main():
 
     try:
         config = load_config(args.mapping_config)
-    except (ConfigurationError, json.JSONDecodeError, OSError) as e:
+    except (ConfigurationError, yaml.YAMLError, OSError) as e:
         print(f"Configuration error: {e}", file=sys.stderr)
         sys.exit(1)
 

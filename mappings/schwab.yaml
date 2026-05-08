@@ -1,0 +1,35 @@
+column_map:
+  Date: date
+  Symbol: ticker
+  Action: type
+  Quantity: quantity
+  Price: price
+  Time: time
+
+type_map:
+  Buy: BUY
+  Sell: SELL
+  Reinvest Dividend: SELL
+  Reinvest Shares: BUY
+  Short Term Cap Gain Reinvest: SELL
+  Journaled Shares: BUY
+
+skip_types:
+  - Journal
+  - Cash Dividend
+  - Non-Qualified Div
+  - Security Transfer
+  - Credit Interest
+  - Long Term Cap Gain
+
+date_format: "%m/%d/%Y"
+
+defaults:
+  currency: USD
+
+sweep_types:
+  types:
+    - Reinvest Dividend
+    - Short Term Cap Gain Reinvest
+  quantity_col: Amount
+  price_override: "1.0"

@@ -50,10 +50,10 @@ reinvestment price.
 ## Translating brokerage exports
 
 Most brokerage CSV exports use different column names and value formats than `acb.py` expects.
-`translate.py` bridges that gap using a JSON mapping config:
+`translate.py` bridges that gap using a YAML mapping config:
 
 ```
-python3 translate.py <broker_export.csv> <mapping.json> [-o output.csv]
+python3 translate.py <broker_export.csv> <mapping.yaml> [-o output.csv]
                      [--start YYYY-MM-DD] [--end YYYY-MM-DD]
                      [--fx-dir DIR]
 ```
@@ -75,7 +75,7 @@ this up automatically from Bank of Canada daily FX rate files.
 3. Save the file to a directory (e.g. `fx_rates/`); repeat for other currencies or date ranges
 4. Pass the directory when translating:
    ```
-   python3 translate.py broker.csv mappings/wealthsimple.json --fx-dir fx_rates/
+   python3 translate.py broker.csv mappings/wealthsimple.yaml --fx-dir fx_rates/
    ```
 
 **Note:** Bank of Canada downloads may include introductory rows above the data header.
@@ -97,19 +97,20 @@ transaction types in settlement funds. For example, Vanguard's "Sweep in" and "S
 Use `sweep_types` in the mapping config to redirect quantity and/or price for a set of
 broker transaction type values:
 
-```json
-"sweep_types": {
-    "types":          ["Sweep in", "Sweep out"],
-    "quantity_col":   "Net Amount",
-    "price_override": "1.0"
-}
+```yaml
+sweep_types:
+  types:
+    - Sweep in
+    - Sweep out
+  quantity_col: Net Amount
+  price_override: "1.0"
 ```
 
 - `types` — list of raw broker transaction type values that need alternate column handling
 - `quantity_col` — broker column name to use as quantity instead of the mapped column (sign is stripped; absolute value is used)
-- `price_override` — literal string to use as price (omit if the mapped price column is already correct)
+- `price_override` — literal price to use (omit if the mapped price column is already correct)
 
-A ready-to-use Vanguard mapping including this config is in `mappings/vanguard.json`.
+A ready-to-use Vanguard mapping including this config is in `mappings/vanguard.yaml`.
 
 ### Dates
 
