@@ -1,0 +1,181 @@
+"""Run the full ACB pipeline from a YAML config file.
+
+Usage:
+    python3 run.py <config.yaml> [-o output.csv] [-p]
+
+The config file specifies brokerage sources to translate and combine:
+
+    fx_dir: fx_rates/              # optional — directory of Bank of Canada FX CSVs
+    output: output/combined.csv    # optional — output path (relative to config file)
+
+    sources:
+      - input: exports/starting.csv
+        mapping: mappings/manual.yaml
+
+      - input: exports/vanguard/*.csv
+        mapping: mappings/vanguard.yaml
+        start: 2025-01-01
+        end: 2025-12-31
+
+      - input: exports/schwab/*.csv
+        mapping: mappings/schwab.yaml
+        start: 2025-01-01
+
+All paths are relative to the config file's directory.
+Sources are processed in order; glob patterns are expanded alphabetically.
+The -o flag is relative to the current working directory and overrides 'output'.
+"""
+
+import argparse
+import glob as glob_module
+import sys
+from pathlib import Path
+
+import yaml
+from tabulate import tabulate
+
+from acb_lib import compute_acb, normalize_rows, write_csv
+from translate_lib import (
+    ConfigurationError,
+    FXRateError,
+    TranslationError,
+    load_fx_rates,
+    translate_file,
+)
+
+_VALID_RUN_KEYS = frozenset({"sources", "output", "fx_dir"})
+_VALID_SOURCE_KEYS = frozenset({"input", "mapping", "start", "end"})
+
+
+def load_run_config(config_path):
+    """Load and validate the master run config YAML."""
+    with open(config_path) as f:
+        data = yaml.safe_load(f)
+    if not isinstance(data, dict):
+        raise ConfigurationError(f"{config_path}: run config must be a YAML mapping")
+
+    unknown = sorted(set(data) - _VALID_RUN_KEYS)
+    if unknown:
+        raise ConfigurationError(
+            f"{config_path}: unknown key(s) {unknown}\n"
+            f"Valid keys: {sorted(_VALID_RUN_KEYS)}"
+        )
+
+    sources = data.get("sources")
+    if not isinstance(sources, list) or not sources:
+        raise ConfigurationError(f"{config_path}: 'sources' must be a non-empty list")
+
+    for i, src in enumerate(sources):
+        if not isinstance(src, dict):
+            raise ConfigurationError(f"{config_path}: sources[{i}] must be a mapping")
+        unknown_src = sorted(set(src) - _VALID_SOURCE_KEYS)
+        if unknown_src:
+            raise ConfigurationError(
+                f"{config_path}: sources[{i}] has unknown key(s) {unknown_src}\n"
+                f"Valid source keys: {sorted(_VALID_SOURCE_KEYS)}"
+            )
+        for key in ("input", "mapping"):
+            if key not in src:
+                raise ConfigurationError(
+                    f"{config_path}: sources[{i}] missing required key '{key}'"
+                )
+
+    return data
+
+
+def _resolve(base_dir, path_str):
+    """Resolve a path string relative to base_dir if it is not absolute."""
+    p = Path(path_str)
+    return p if p.is_absolute() else base_dir / p
+
+
+def _expand_input(base_dir, pattern_str):
+    """Glob-expand an input pattern; return sorted list of Paths.
+
+    Raises FileNotFoundError if no files match.
+    """
+    search = str(_resolve(base_dir, pattern_str))
+    paths = sorted(Path(p) for p in glob_module.glob(search))
+    if not paths:
+        raise FileNotFoundError(f"no files matched: {search}")
+    return paths
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("config", help="run config YAML")
+    parser.add_argument("-o", "--output", help="output CSV (overrides config; relative to CWD)")
+    parser.add_argument("-p", "--pretty", action="store_true", help="pretty-print console output")
+    args = parser.parse_args()
+
+    config_path = Path(args.config).resolve()
+    base_dir = config_path.parent
+
+    try:
+        run_config = load_run_config(config_path)
+    except (ConfigurationError, yaml.YAMLError, OSError) as e:
+        print(f"Configuration error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    fx_rates = None
+    if run_config.get("fx_dir"):
+        try:
+            fx_rates = load_fx_rates(_resolve(base_dir, run_config["fx_dir"]))
+        except FXRateError as e:
+            print(f"Exchange rate error: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    all_translated = []
+    for i, src in enumerate(run_config["sources"]):
+        try:
+            input_paths = _expand_input(base_dir, src["input"])
+        except FileNotFoundError as e:
+            print(f"Input error (sources[{i}]): {e}", file=sys.stderr)
+            sys.exit(1)
+
+        mapping_path = str(_resolve(base_dir, src["mapping"]))
+        # YAML parses bare dates (2025-01-01) as datetime.date; convert to ISO string.
+        start = str(src["start"]) if src.get("start") is not None else None
+        end = str(src["end"]) if src.get("end") is not None else None
+
+        for input_path in input_paths:
+            try:
+                rows = translate_file(
+                    str(input_path), mapping_path,
+                    start=start, end=end, fx_rates=fx_rates,
+                )
+                all_translated.extend(rows)
+            except (ConfigurationError, yaml.YAMLError, OSError) as e:
+                print(f"Configuration error ({input_path.name}): {e}", file=sys.stderr)
+                sys.exit(1)
+            except TranslationError as e:
+                print(f"Translation error ({input_path.name}): {e}", file=sys.stderr)
+                sys.exit(1)
+            except FXRateError as e:
+                print(f"Exchange rate error ({input_path.name}): {e}", file=sys.stderr)
+                sys.exit(1)
+
+    try:
+        output_rows = list(compute_acb(normalize_rows(all_translated)))
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if args.output:
+        output_path = Path(args.output)
+    elif run_config.get("output"):
+        output_path = _resolve(base_dir, run_config["output"])
+    else:
+        output_path = None
+
+    if output_path:
+        with open(output_path, "w", newline="") as f:
+            write_csv(output_rows, f)
+    elif args.pretty:
+        print(tabulate(output_rows, headers="keys", tablefmt="grid", floatfmt="s"))
+    else:
+        write_csv(output_rows, sys.stdout)
+
+
+if __name__ == "__main__":
+    main()
