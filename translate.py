@@ -17,6 +17,9 @@ The mapping config is a YAML file with the following schema:
       Price ($): price
       Currency: currency
 
+    optional_columns:         # optional — broker column names from column_map that may be absent from the CSV
+      - Time                  #   no error is raised if these columns are not present in the input
+
     type_map:                 # optional — remap broker type values to BUY/SELL/START
       Buy: BUY
       Sell: SELL
@@ -74,6 +77,7 @@ def main():
     parser.add_argument("--start", metavar="YYYY-MM-DD", help="exclude rows before this date (inclusive)")
     parser.add_argument("--end", metavar="YYYY-MM-DD", help="exclude rows after this date (inclusive)")
     parser.add_argument("--fx-dir", metavar="DIR", help="directory of Bank of Canada FX rate CSVs for automatic exchange rate lookup")
+    parser.add_argument("--account", metavar="NUMBER", help="account number to stamp on every output row")
     args = parser.parse_args()
 
     fx_rates = None
@@ -98,6 +102,9 @@ def main():
     except FXRateError as e:
         print(f"Exchange rate error: {e}", file=sys.stderr)
         sys.exit(1)
+
+    if args.account:
+        translated = [{**row, "account_number": args.account} for row in translated]
 
     present = set()
     for row in translated:

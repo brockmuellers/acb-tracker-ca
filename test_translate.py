@@ -16,6 +16,7 @@ from translate_lib import (
     load_config,
     load_fx_rates,
     lookup_rate,
+    translate_file,
     translate_rows,
     validate_column_map,
     validate_columns,
@@ -414,10 +415,10 @@ def test_cli_output_pipes_into_acb(tmp_path):
         check=True,
     )
     assert acb_out.read_text() == (
-        "date,ticker,type,quantity,price,currency,exchange_rate,amount_cad,acb_cad,gain_loss_cad,superficial_loss_cad\n"
-        "2024-01-15,VFV,BUY,100,98.50,CAD,1,9850.00,9850.00,,\n"
-        "2024-03-10,VFV,BUY,50,102.00,CAD,1,5100.00,14950.00,,\n"
-        "2024-06-20,VFV,SELL,75,110.00,CAD,1,8250.00,7475.00,775.00,\n"
+        "account_number,date,ticker,type,quantity,price,currency,exchange_rate,amount_cad,acb_cad,gain_loss_cad,superficial_loss_cad\n"
+        ",2024-01-15,VFV,BUY,100,98.50,CAD,1,9850.00,9850.00,,\n"
+        ",2024-03-10,VFV,BUY,50,102.00,CAD,1,5100.00,14950.00,,\n"
+        ",2024-06-20,VFV,SELL,75,110.00,CAD,1,8250.00,7475.00,775.00,\n"
     )
 
 
@@ -736,6 +737,54 @@ def test_validate_column_map_passes_when_sweep_quantity_col_present():
         CSV_HEADERS,
         sweep_quantity_col="Net Amount",
     )
+
+
+def test_validate_column_map_optional_column_absent_no_error():
+    column_map = {**BASE_CONFIG["column_map"], "Time": "time"}
+    validate_column_map(column_map, CSV_HEADERS, optional_columns={"Time"})
+
+
+def test_validate_column_map_optional_column_absent_still_raises_for_required():
+    column_map = {**BASE_CONFIG["column_map"], "Time": "time", "Missing": "currency"}
+    with pytest.raises(ValueError, match="Missing"):
+        validate_column_map(column_map, CSV_HEADERS, optional_columns={"Time"})
+
+
+def test_appconfig_optional_columns_entry_not_in_column_map_raises():
+    with pytest.raises(ValueError, match="not found in 'column_map'"):
+        AppConfig.from_dict({**BASE_CONFIG, "optional_columns": ["NotAKey"]})
+
+
+def test_appconfig_optional_columns_not_list_raises():
+    with pytest.raises(ValueError, match="must be a list"):
+        AppConfig.from_dict({**BASE_CONFIG, "optional_columns": "Time"})
+
+
+def test_translate_file_optional_column_absent_silently_omitted(tmp_path):
+    csv_path = tmp_path / "in.csv"
+    csv_path.write_text("Trade Date,Symbol,Txn Type,Shares,Price ($)\n2024-01-15,VFV,BUY,100,98.50\n")
+    mapping_path = tmp_path / "map.yaml"
+    mapping_path.write_text(yaml.dump({
+        **BASE_CONFIG,
+        "column_map": {**BASE_CONFIG["column_map"], "Time": "time"},
+        "optional_columns": ["Time"],
+    }))
+    rows = translate_file(str(csv_path), str(mapping_path))
+    assert len(rows) == 1
+    assert "time" not in rows[0]
+
+
+def test_translate_file_optional_column_present_flows_through(tmp_path):
+    csv_path = tmp_path / "in.csv"
+    csv_path.write_text("Trade Date,Symbol,Txn Type,Shares,Price ($),Time\n2024-01-15,VFV,BUY,100,98.50,10:30\n")
+    mapping_path = tmp_path / "map.yaml"
+    mapping_path.write_text(yaml.dump({
+        **BASE_CONFIG,
+        "column_map": {**BASE_CONFIG["column_map"], "Time": "time"},
+        "optional_columns": ["Time"],
+    }))
+    rows = translate_file(str(csv_path), str(mapping_path))
+    assert rows[0]["time"] == "10:30"
 
 
 # --- improved error context (row numbers, column names) ---

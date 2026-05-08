@@ -6,6 +6,7 @@ column_map:
   Share Price: price
   Currency: currency
   Superficial Qty: superficial_qty
+  Account Number: account_number
 
 type_map:
   Start: START

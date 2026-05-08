@@ -78,9 +78,9 @@ def main():
     if args.output:
         with open(args.output, "w", newline="") as f:
             write_csv(output_rows, f)
-    elif args.pretty:
+    if args.pretty:
         print(tabulate(output_rows, headers="keys", tablefmt="grid", floatfmt="s"))
-    else:
+    elif not args.output:
         write_csv(output_rows, sys.stdout)
 
 

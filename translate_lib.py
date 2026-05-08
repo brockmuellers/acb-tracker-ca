@@ -8,11 +8,11 @@ from pathlib import Path
 
 import yaml
 
-ACB_INPUT_COLUMNS = ["date", "ticker", "type", "quantity", "price", "currency", "exchange_rate", "time", "superficial_qty"]
+ACB_INPUT_COLUMNS = ["account_number", "date", "ticker", "type", "quantity", "price", "currency", "exchange_rate", "time", "superficial_qty"]
 REQUIRED_COLUMNS = ["date", "ticker", "type", "quantity", "price"]
 FX_COL_RE = re.compile(r"^FX([A-Z]{3})CAD$")
 
-_VALID_CONFIG_KEYS = frozenset({"column_map", "type_map", "skip_types", "date_format", "defaults", "sweep_types"})
+_VALID_CONFIG_KEYS = frozenset({"column_map", "optional_columns", "type_map", "skip_types", "date_format", "defaults", "sweep_types"})
 _VALID_SWEEP_KEYS = frozenset({"types", "quantity_col", "price_override"})
 
 
@@ -64,6 +64,7 @@ class SweepConfig:
 @dataclass
 class AppConfig:
     column_map: dict[str, str]
+    optional_columns: set[str] = field(default_factory=set)
     type_map: dict[str, str] = field(default_factory=dict)
     skip_types: set[str] = field(default_factory=set)
     date_format: str | None = None
@@ -91,6 +92,16 @@ class AppConfig:
             if not isinstance(k, str) or not isinstance(v, str):
                 raise ConfigurationError(
                     f"{p}: 'column_map' keys and values must be strings (got {k!r}: {v!r})"
+                )
+
+        if "optional_columns" in data:
+            oc = data["optional_columns"]
+            if not isinstance(oc, list) or not all(isinstance(x, str) for x in oc):
+                raise ConfigurationError(f"{p}: 'optional_columns' must be a list of strings")
+            unknown_oc = [c for c in oc if c not in cm]
+            if unknown_oc:
+                raise ConfigurationError(
+                    f"{p}: 'optional_columns' entries not found in 'column_map': {unknown_oc}"
                 )
 
         if "type_map" in data:
@@ -132,6 +143,7 @@ class AppConfig:
 
         return cls(
             column_map=cm,
+            optional_columns=set(data.get("optional_columns", [])),
             type_map=data.get("type_map", {}),
             skip_types=set(data.get("skip_types", [])),
             date_format=data.get("date_format"),
@@ -148,10 +160,14 @@ def load_config(config_path: str) -> AppConfig:
     return AppConfig.from_dict(data, config_path)
 
 
-def validate_column_map(column_map, csv_headers, config_path="config", sweep_quantity_col=None):
-    """Raise if any column_map key (or sweep_types.quantity_col) is absent from the CSV headers."""
+def validate_column_map(column_map, csv_headers, config_path="config", sweep_quantity_col=None, optional_columns=None):
+    """Raise if any required column_map key (or sweep_types.quantity_col) is absent from the CSV headers.
+
+    Columns whose broker name is in optional_columns are skipped silently if absent.
+    """
     csv_col_set = set(csv_headers)
-    missing = [k for k in column_map if k not in csv_col_set]
+    optional = optional_columns or set()
+    missing = [k for k in column_map if k not in csv_col_set and k not in optional]
     if sweep_quantity_col and sweep_quantity_col not in csv_col_set:
         missing.append(f"{sweep_quantity_col} (sweep_types)")
     if missing:
@@ -362,7 +378,7 @@ def translate_file(input_path, mapping_path, start=None, end=None, fx_rates=None
         raw_rows = list(csv.DictReader(f))
     if raw_rows:
         sweep_quantity_col = config.sweep.quantity_col if config.sweep else None
-        validate_column_map(config.column_map, raw_rows[0].keys(), mapping_path, sweep_quantity_col)
+        validate_column_map(config.column_map, raw_rows[0].keys(), mapping_path, sweep_quantity_col, config.optional_columns)
     rows = validate_columns(translate_rows(raw_rows, config))
     rows = filter_by_date(rows, start, end)
     if fx_rates:

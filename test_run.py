@@ -153,7 +153,7 @@ def test_cli_single_source_stdout(tmp_path):
         capture_output=True, text=True, check=True,
     )
     lines = result.stdout.strip().splitlines()
-    assert lines[0] == "date,ticker,type,quantity,price,currency,exchange_rate,amount_cad,acb_cad,gain_loss_cad,superficial_loss_cad"
+    assert lines[0] == "account_number,date,ticker,type,quantity,price,currency,exchange_rate,amount_cad,acb_cad,gain_loss_cad,superficial_loss_cad"
     assert len(lines) == 4  # header + 3 rows
 
 

@@ -124,10 +124,10 @@ def test_cli_end_to_end_on_sample_fixture(tmp_path):
     )
     # read_text() normalizes \r\n → \n; that's fine for content equality.
     assert out_path.read_text() == (
-        "date,ticker,type,quantity,price,currency,exchange_rate,amount_cad,acb_cad,gain_loss_cad,superficial_loss_cad\n"
-        "2024-01-15,VFV,BUY,100,98.50,CAD,1,9850.00,9850.00,,\n"
-        "2024-03-10,VFV,BUY,50,102.00,CAD,1,5100.00,14950.00,,\n"
-        "2024-06-20,VFV,SELL,75,110.00,CAD,1,8250.00,7475.00,775.00,\n"
+        "account_number,date,ticker,type,quantity,price,currency,exchange_rate,amount_cad,acb_cad,gain_loss_cad,superficial_loss_cad\n"
+        ",2024-01-15,VFV,BUY,100,98.50,CAD,1,9850.00,9850.00,,\n"
+        ",2024-03-10,VFV,BUY,50,102.00,CAD,1,5100.00,14950.00,,\n"
+        ",2024-06-20,VFV,SELL,75,110.00,CAD,1,8250.00,7475.00,775.00,\n"
     )
 
 
@@ -198,10 +198,10 @@ def test_cli_end_to_end_on_opening_balance_fixture(tmp_path):
         check=True,
     )
     assert out_path.read_text() == (
-        "date,ticker,type,quantity,price,currency,exchange_rate,amount_cad,acb_cad,gain_loss_cad,superficial_loss_cad\n"
-        "2023-12-31,VFV,START,100,95.00,CAD,1,9500.00,9500.00,,\n"
-        "2024-03-10,VFV,BUY,50,102.00,CAD,1,5100.00,14600.00,,\n"
-        "2024-06-20,VFV,SELL,75,110.00,CAD,1,8250.00,7300.00,950.00,\n"
+        "account_number,date,ticker,type,quantity,price,currency,exchange_rate,amount_cad,acb_cad,gain_loss_cad,superficial_loss_cad\n"
+        ",2023-12-31,VFV,START,100,95.00,CAD,1,9500.00,9500.00,,\n"
+        ",2024-03-10,VFV,BUY,50,102.00,CAD,1,5100.00,14600.00,,\n"
+        ",2024-06-20,VFV,SELL,75,110.00,CAD,1,8250.00,7300.00,950.00,\n"
     )
 
 
@@ -299,7 +299,7 @@ def test_cli_end_to_end_with_currency_columns(tmp_path):
     )
     # Blank currency/exchange_rate in input get normalized to CAD/1 in output.
     assert out_path.read_text() == (
-        "date,ticker,type,quantity,price,currency,exchange_rate,amount_cad,acb_cad,gain_loss_cad,superficial_loss_cad\n"
-        "2025-01-02,AAPL,BUY,10,180.00,USD,1.4418,2595.240000,2595.24,,\n"
-        "2025-01-15,VFV,BUY,100,98.50,CAD,1,9850.00,9850.00,,\n"
+        "account_number,date,ticker,type,quantity,price,currency,exchange_rate,amount_cad,acb_cad,gain_loss_cad,superficial_loss_cad\n"
+        ",2025-01-02,AAPL,BUY,10,180.00,USD,1.4418,2595.240000,2595.24,,\n"
+        ",2025-01-15,VFV,BUY,100,98.50,CAD,1,9850.00,9850.00,,\n"
     )

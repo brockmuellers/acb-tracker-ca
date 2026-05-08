@@ -11,7 +11,7 @@ RESET = "\033[0m"
 CENTS = Decimal("0.01")
 ONE = Decimal("1")
 OUTPUT_COLUMNS = [
-    "date", "ticker", "type", "quantity", "price",
+    "account_number", "date", "ticker", "type", "quantity", "price",
     "currency", "exchange_rate", "amount_cad", "acb_cad", "gain_loss_cad", "superficial_loss_cad",
 ]
 
@@ -62,6 +62,7 @@ def normalize_rows(rows):
         else:
             superficial_qty = None
         result.append({
+            "account_number": (row.get("account_number") or "").strip(),
             "date": date,
             "ticker": ticker,
             "type": row["type"].strip().upper(),
@@ -181,6 +182,7 @@ def compute_acb(rows):
         # TODO: should total_acb be rounded when saving to state?
         state[0], state[1] = shares, total_acb
         yield {
+            "account_number": tx.get("account_number", ""),
             "date": tx["date"],
             "ticker": ticker,
             "type": tx_type,
@@ -196,7 +198,7 @@ def compute_acb(rows):
 
 
 def write_csv(rows, out):
-    writer = csv.DictWriter(out, fieldnames=OUTPUT_COLUMNS)
+    writer = csv.DictWriter(out, fieldnames=OUTPUT_COLUMNS, restval="")
     writer.writeheader()
     for row in rows:
         writer.writerow(row)

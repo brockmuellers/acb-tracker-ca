@@ -132,6 +132,7 @@ python3 -m pytest test_acb.py test_translate.py -v
   exchange rate. No FX rate file lookup, auto-inversion, or cross-currency
   chaining.
 - No explicit tracking or verification of current holdings by account. This would be useful for checking that all transactions are correctly handled in mappings.
+- Tracking cash holdings.
 - Transaction notes / comments.
 - Row de-duplication.
 - Potentially inconsistent currency rounding - values may be inaccurate by a few cents.

@@ -43,7 +43,7 @@ from translate_lib import (
 )
 
 _VALID_RUN_KEYS = frozenset({"sources", "output", "fx_dir", "start", "end"})
-_VALID_SOURCE_KEYS = frozenset({"input", "mapping"})
+_VALID_SOURCE_KEYS = frozenset({"input", "mapping", "account_number"})
 
 
 def load_run_config(config_path):
@@ -144,6 +144,9 @@ def main():
                     str(input_path), mapping_path,
                     start=start, end=end, fx_rates=fx_rates,
                 )
+                if src.get("account_number"):
+                    acct = str(src["account_number"])
+                    rows = [{**r, "account_number": acct} for r in rows]
                 all_translated.extend(rows)
             except (ConfigurationError, yaml.YAMLError, OSError) as e:
                 print(f"Configuration error ({input_path.name}): {e}", file=sys.stderr)
@@ -162,18 +165,15 @@ def main():
         sys.exit(1)
 
     if args.output:
-        output_path = Path(args.output)
+        with open(args.output, "w", newline="") as f:
+            write_csv(output_rows, f)
     elif run_config.get("output"):
         output_path = _resolve(base_dir, run_config["output"])
-    else:
-        output_path = None
-
-    if output_path:
         with open(output_path, "w", newline="") as f:
             write_csv(output_rows, f)
-    elif args.pretty:
+    if args.pretty:
         print(tabulate(output_rows, headers="keys", tablefmt="grid", floatfmt="s"))
-    else:
+    elif not args.output and not run_config.get("output"):
         write_csv(output_rows, sys.stdout)
 
 
