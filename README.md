@@ -127,10 +127,11 @@ python3 -m pytest test_acb.py test_translate.py -v
 - Only `START`, `BUY`, and `SELL` (no DRIP, ROC, splits, phantom distributions).
 - Superficial loss rule is user-directed via `superficial_qty`; automatic 30-day window detection is not supported (CRA affiliated-person rules make this impossible to determine from a single account's CSV).
 - No zero-floor handling; over-selling raises a clear error.
-- ACB is always reported in CAD; the user supplies the per-row foreign-to-CAD
+- ACB is always reported in CAD, so the user must supply a file with foreign-to-CAD
   exchange rate. No FX rate file lookup, auto-inversion, or cross-currency
   chaining.
-- No explicit tracking or verification of current holdings by account.
+- No explicit tracking or verification of current holdings by account. This would be useful for checking that all transactions are correctly handled in mappings.
 - Transaction notes / comments.
 - Row de-duplication.
-- ETF conversion (must be treated as BUY/SELL with manually calculated amounts that correctly transfer cost basis.)
+- Potentially inconsistent currency rounding - values may be inaccurate by a few cents.
+- ETF conversion (assuming we treat ETF conversion as a tax-deferred action) must be treated as BUY/SELL with manually calculated amounts that correctly transfer cost basis.
