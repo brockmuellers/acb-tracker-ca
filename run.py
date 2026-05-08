@@ -33,7 +33,7 @@ from pathlib import Path
 import yaml
 from tabulate import tabulate
 
-from acb_lib import compute_acb, normalize_rows, write_csv
+from acb_lib import compute_acb, compute_holdings, normalize_rows, write_csv, write_holdings_csv
 from translate_lib import (
     ConfigurationError,
     FXRateError,
@@ -42,7 +42,7 @@ from translate_lib import (
     translate_file,
 )
 
-_VALID_RUN_KEYS = frozenset({"sources", "output", "fx_dir", "start", "end"})
+_VALID_RUN_KEYS = frozenset({"sources", "output", "output_holdings", "fx_dir", "start", "end"})
 _VALID_SOURCE_KEYS = frozenset({"input", "mapping", "account_number"})
 
 
@@ -171,8 +171,21 @@ def main():
         output_path = _resolve(base_dir, run_config["output"])
         with open(output_path, "w", newline="") as f:
             write_csv(output_rows, f)
+
+    holdings_rows = None
+    if run_config.get("output_holdings") or args.pretty:
+        holdings_rows = compute_holdings(output_rows)
+
+    if run_config.get("output_holdings"):
+        holdings_path = _resolve(base_dir, run_config["output_holdings"])
+        with open(holdings_path, "w", newline="") as f:
+            write_holdings_csv(holdings_rows, f)
+
     if args.pretty:
+        print("=== Transactions ===")
         print(tabulate(output_rows, headers="keys", tablefmt="grid", floatfmt="s"))
+        print("\n=== Holdings ===")
+        print(tabulate(holdings_rows, headers="keys", tablefmt="grid", floatfmt="s"))
     elif not args.output and not run_config.get("output"):
         write_csv(output_rows, sys.stdout)
 

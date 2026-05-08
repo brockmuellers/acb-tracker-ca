@@ -347,3 +347,41 @@ def test_cli_values_match_acb_calculation(tmp_path):
     assert "14950.00" in content
     assert "7475.00" in content
     assert "775.00" in content
+
+
+def test_cli_output_holdings_file(tmp_path):
+    # Two sources with different account numbers: same ticker VFV.
+    # A1 buys 100 @ 98.50; A2 buys 50 @ 102.00. ACB = 14950.00.
+    csv_a1 = tmp_path / "a1.csv"
+    csv_a1.write_text(
+        "date,ticker,type,quantity,price\n"
+        "2024-01-15,VFV,BUY,100,98.50\n"
+    )
+    csv_a2 = tmp_path / "a2.csv"
+    csv_a2.write_text(
+        "date,ticker,type,quantity,price\n"
+        "2024-03-10,VFV,BUY,50,102.00\n"
+    )
+    simple_mapping(tmp_path)
+    out = tmp_path / "out.csv"
+    holdings_out = tmp_path / "holdings.csv"
+    write_config(tmp_path / "run.yaml", {
+        "sources": [
+            {"input": "a1.csv", "mapping": "mapping.yaml", "account_number": "A1"},
+            {"input": "a2.csv", "mapping": "mapping.yaml", "account_number": "A2"},
+        ],
+        "output": "out.csv",
+        "output_holdings": "holdings.csv",
+    })
+    subprocess.run(
+        [sys.executable, str(REPO / "run.py"), str(tmp_path / "run.yaml")],
+        check=True,
+    )
+    assert holdings_out.exists()
+    lines = holdings_out.read_text().splitlines()
+    assert lines[0] == "account_number,ticker,quantity,acb_cad"
+    # A1 row, A2 row, TOTAL row
+    assert len(lines) == 4
+    assert lines[1].startswith("A1,VFV,100,")
+    assert lines[2].startswith("A2,VFV,50,")
+    assert lines[3] == "TOTAL,VFV,150,14950.00"

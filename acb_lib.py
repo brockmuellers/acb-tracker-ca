@@ -14,6 +14,7 @@ OUTPUT_COLUMNS = [
     "account_number", "date", "ticker", "type", "quantity", "price",
     "currency", "exchange_rate", "amount_cad", "acb_cad", "gain_loss_cad", "superficial_loss_cad",
 ]
+HOLDINGS_COLUMNS = ["account_number", "ticker", "quantity", "acb_cad"]
 
 
 def _normalize_time(s):
@@ -201,4 +202,84 @@ def write_csv(rows, out):
     writer = csv.DictWriter(out, fieldnames=OUTPUT_COLUMNS, restval="")
     writer.writeheader()
     for row in rows:
+        writer.writerow(row)
+
+
+def compute_holdings(output_rows):
+    """Compute per-account and total holdings from compute_acb output rows.
+
+    Returns a list of dicts with keys: account_number, ticker, quantity, acb_cad.
+    Tickers are sorted alphabetically; accounts within each ticker are sorted
+    alphabetically with a synthetic TOTAL row last.
+    """
+    per_account_qty = {}   # (ticker, account) -> Decimal net quantity
+    ticker_acb = {}        # ticker -> final acb_cad (from last row for that ticker)
+    accounts_seen = {}     # ticker -> set of account_numbers
+
+    for row in output_rows:
+        ticker = row["ticker"]
+        acct = row["account_number"]
+        qty = row["quantity"]
+        tx_type = row["type"]
+
+        if ticker not in accounts_seen:
+            accounts_seen[ticker] = set()
+        accounts_seen[ticker].add(acct)
+
+        key = (ticker, acct)
+        if key not in per_account_qty:
+            per_account_qty[key] = Decimal(0)
+
+        if tx_type in ("BUY", "START"):
+            per_account_qty[key] += qty
+        elif tx_type == "SELL":
+            per_account_qty[key] -= qty
+
+        ticker_acb[ticker] = row["acb_cad"]
+
+    # Precompute totals per ticker.
+    ticker_total_qty = {
+        ticker: sum(per_account_qty[(ticker, a)] for a in accounts_seen[ticker])
+        for ticker in ticker_acb
+    }
+
+    all_accounts = sorted({a for accts in accounts_seen.values() for a in accts})
+    all_tickers = sorted(ticker_acb)
+
+    rows = []
+    # Per-account rows: ordered by (account, ticker).
+    for acct in all_accounts:
+        for ticker in all_tickers:
+            if acct not in accounts_seen.get(ticker, set()):
+                continue
+            total_qty = ticker_total_qty[ticker]
+            total_acb = ticker_acb[ticker]
+            acct_qty = per_account_qty[(ticker, acct)]
+            if total_qty != 0:
+                acct_acb = (acct_qty / total_qty * total_acb).quantize(CENTS, rounding=ROUND_HALF_EVEN)
+            else:
+                acct_acb = Decimal("0.00")
+            rows.append({
+                "account_number": acct,
+                "ticker": ticker,
+                "quantity": acct_qty,
+                "acb_cad": acct_acb,
+            })
+
+    # TOTAL rows at the end, sorted by ticker.
+    for ticker in all_tickers:
+        rows.append({
+            "account_number": "TOTAL",
+            "ticker": ticker,
+            "quantity": ticker_total_qty[ticker],
+            "acb_cad": ticker_acb[ticker],
+        })
+
+    return rows
+
+
+def write_holdings_csv(holdings_rows, out):
+    writer = csv.DictWriter(out, fieldnames=HOLDINGS_COLUMNS, restval="")
+    writer.writeheader()
+    for row in holdings_rows:
         writer.writerow(row)

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from acb_lib import compute_acb, load_transactions
+from acb_lib import compute_acb, compute_holdings, load_transactions
 
 REPO = Path(__file__).parent
 
@@ -303,3 +303,109 @@ def test_cli_end_to_end_with_currency_columns(tmp_path):
         ",2025-01-02,AAPL,BUY,10,180.00,USD,1.4418,2595.240000,2595.24,,\n"
         ",2025-01-15,VFV,BUY,100,98.50,CAD,1,9850.00,9850.00,,\n"
     )
+
+
+# --- compute_holdings ---
+
+def holdings_tx(date, ticker, tx_type, quantity, price, account=""):
+    return {
+        "account_number": account,
+        "date": date,
+        "ticker": ticker,
+        "type": tx_type,
+        "quantity": Decimal(str(quantity)),
+        "price": Decimal(str(price)),
+        "currency": "CAD",
+        "exchange_rate": Decimal("1"),
+        "time": "",
+        "superficial_qty": None,
+    }
+
+
+def test_holdings_single_account_single_ticker():
+    rows = [
+        holdings_tx("2024-01-15", "VFV", "BUY", 100, "98.50", account="A1"),
+        holdings_tx("2024-03-10", "VFV", "BUY", 50, "102.00", account="A1"),
+        holdings_tx("2024-06-20", "VFV", "SELL", 75, "110.00", account="A1"),
+    ]
+    output_rows = list(compute_acb(rows))
+    holdings = compute_holdings(output_rows)
+    # 75 shares remaining, acb 7475.00; one account row + one TOTAL row
+    assert len(holdings) == 2
+    acct_row = holdings[0]
+    total_row = holdings[1]
+    assert acct_row == {"account_number": "A1", "ticker": "VFV", "quantity": Decimal("75"), "acb_cad": Decimal("7475.00")}
+    assert total_row == {"account_number": "TOTAL", "ticker": "VFV", "quantity": Decimal("75"), "acb_cad": Decimal("7475.00")}
+
+
+def test_holdings_two_accounts_same_ticker():
+    # A1 buys 100, A2 buys 50; no sells. ACB = 14950, split 2/3 and 1/3.
+    rows = [
+        holdings_tx("2024-01-15", "VFV", "BUY", 100, "98.50", account="A1"),
+        holdings_tx("2024-03-10", "VFV", "BUY", 50, "102.00", account="A2"),
+    ]
+    output_rows = list(compute_acb(rows))
+    holdings = compute_holdings(output_rows)
+    # Sorted: A1, A2, TOTAL
+    assert len(holdings) == 3
+    a1 = holdings[0]
+    a2 = holdings[1]
+    total = holdings[2]
+    assert a1["account_number"] == "A1"
+    assert a1["quantity"] == Decimal("100")
+    assert a1["acb_cad"] == Decimal("9966.67")  # 100/150 * 14950 = 9966.666... → 9966.67
+    assert a2["account_number"] == "A2"
+    assert a2["quantity"] == Decimal("50")
+    assert a2["acb_cad"] == Decimal("4983.33")  # 50/150 * 14950 = 4983.333... → 4983.33
+    assert total["account_number"] == "TOTAL"
+    assert total["quantity"] == Decimal("150")
+    assert total["acb_cad"] == Decimal("14950.00")
+
+
+def test_holdings_fully_sold_zero_quantity():
+    rows = [
+        holdings_tx("2024-01-15", "VFV", "BUY", 100, "98.50", account="A1"),
+        holdings_tx("2024-06-20", "VFV", "SELL", 100, "110.00", account="A1"),
+    ]
+    output_rows = list(compute_acb(rows))
+    holdings = compute_holdings(output_rows)
+    assert len(holdings) == 2
+    assert holdings[0]["quantity"] == Decimal("0")
+    assert holdings[0]["acb_cad"] == Decimal("0.00")
+    assert holdings[1]["account_number"] == "TOTAL"
+    assert holdings[1]["quantity"] == Decimal("0")
+    assert holdings[1]["acb_cad"] == Decimal("0.00")
+
+
+def test_holdings_tickers_sorted_alphabetically():
+    rows = [
+        holdings_tx("2024-01-15", "ZZZ", "BUY", 10, "5.00", account="A1"),
+        holdings_tx("2024-01-16", "AAA", "BUY", 20, "3.00", account="A1"),
+    ]
+    output_rows = list(compute_acb(rows))
+    holdings = compute_holdings(output_rows)
+    tickers = [r["ticker"] for r in holdings if r["account_number"] == "TOTAL"]
+    assert tickers == ["AAA", "ZZZ"]
+
+
+def test_holdings_multi_ticker_multi_account():
+    # RRSP has VFV + XEQT; TFSA has VFV only.
+    # Expected order: RRSP/VFV, RRSP/XEQT, TFSA/VFV, TOTAL/VFV, TOTAL/XEQT
+    rows = [
+        holdings_tx("2024-01-15", "VFV", "BUY", 100, "98.50", account="TFSA"),
+        holdings_tx("2024-01-16", "XEQT", "BUY", 200, "28.00", account="RRSP"),
+        holdings_tx("2024-01-17", "VFV", "BUY", 50, "100.00", account="RRSP"),
+    ]
+    output_rows = list(compute_acb(rows))
+    holdings = compute_holdings(output_rows)
+    assert [(r["account_number"], r["ticker"]) for r in holdings] == [
+        ("RRSP", "VFV"),
+        ("RRSP", "XEQT"),
+        ("TFSA", "VFV"),
+        ("TOTAL", "VFV"),
+        ("TOTAL", "XEQT"),
+    ]
+    total_vfv = next(r for r in holdings if r["account_number"] == "TOTAL" and r["ticker"] == "VFV")
+    total_xeqt = next(r for r in holdings if r["account_number"] == "TOTAL" and r["ticker"] == "XEQT")
+    assert total_vfv["quantity"] == Decimal("150")
+    assert total_xeqt["quantity"] == Decimal("200")
