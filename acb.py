@@ -220,7 +220,7 @@ def compute_acb(rows):
                 gain_loss = raw_gain_loss.quantize(CENTS, rounding=ROUND_HALF_EVEN)
                 if s_qty is None and gain_loss < 0:
                     print(
-                        f"{YELLOW}Warning: SELL of {ticker} on {tx['date']} realized a loss of "
+                        f"{YELLOW}Warning: SELL of {qty} shares of {ticker} on {tx['date']} realized a loss of "
                         f"{gain_loss}. If you or an affiliated person bought the same security "
                         f"within 30 days before or after this sale, set superficial_qty to the "
                         f"number of shares repurchased. Set to 0 to confirm no superficial loss.{RESET}",
