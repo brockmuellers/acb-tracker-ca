@@ -2,11 +2,15 @@
 
 import csv
 import re
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
 import yaml
+
+YELLOW = "\033[33m"
+RESET = "\033[0m"
 
 ACB_INPUT_COLUMNS = ["account_number", "date", "ticker", "type", "quantity", "price", "currency", "exchange_rate", "time", "superficial_qty"]
 REQUIRED_COLUMNS = ["date", "ticker", "type", "quantity", "price"]
@@ -211,12 +215,19 @@ def translate_rows(rows, config: AppConfig):
         if skip_types and out.get("type") in skip_types:
             continue
 
-        # Clean numeric fields; quantity is always positive (sign is encoded in type).
+        # Drop rows with no ticker — cash-only or metadata rows that aren't security transactions.
+        if "ticker" in out and not out["ticker"].strip():
+            continue
+
+        # Clean numeric fields. Quantity is always positive (sign encoded in type),
+        # except for TRANSFER rows where negative quantity means transfer out.
         for col in ("price", "quantity"):
             if col in out:
                 out[col] = clean_number(out[col])
         if "quantity" in out:
-            out["quantity"] = out["quantity"].lstrip("-")
+            resolves_to_transfer = type_map.get(out.get("type", "")) == "TRANSFER"
+            if not resolves_to_transfer:
+                out["quantity"] = out["quantity"].lstrip("-")
 
         # Sweep type override: some brokers store quantity/price in alternate columns for
         # sweep transaction types (e.g. Vanguard puts dollar amount in Net Amount for sweeps).
@@ -260,6 +271,18 @@ def translate_rows(rows, config: AppConfig):
         # Validate that quantity and price are non-zero after all transformations.
         # This is the primary safeguard against column mapping mis-configurations (e.g. a broker
         # that stores quantity in a non-standard column silently producing 0-share rows).
+        # Exception: price is ignored for TRANSFER-out rows, so empty/missing price is fine.
+        is_transfer = out.get("type") == "TRANSFER"
+        is_transfer_out = is_transfer and out.get("quantity", "").startswith("-")
+        if is_transfer and not out.get("price"):
+            out["price"] = "0"
+            if not is_transfer_out:
+                print(
+                    f"{YELLOW}Warning: TRANSFER (in) of {out.get('ticker', '?')} on "
+                    f"{out.get('date', '?')} has no price — the transferred shares will carry "
+                    f"0 ACB. Set 'price' to the per-share ACB of the incoming shares.{RESET}",
+                    file=sys.stderr, flush=True,
+                )
         loc = f"row {row_num} ({out.get('ticker', '?')} on {out.get('date', '?')})"
         for col in ("quantity", "price"):
             if col in out:
@@ -267,7 +290,7 @@ def translate_rows(rows, config: AppConfig):
                     val = float(out[col])
                 except (ValueError, TypeError):
                     raise TranslationError(f"{loc}: {col} {out[col]!r} is not a valid number")
-                if val == 0:
+                if val == 0 and not (col == "price" and is_transfer):
                     raise TranslationError(
                         f"{loc}: {col} is 0 — check your column_map or sweep_types config"
                     )

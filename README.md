@@ -22,9 +22,9 @@ Output goes to stdout unless `-o` is given.
 | --------------- | -------- | ----------------------------------------------------------------------------- |
 | `date`          | yes      | ISO 8601 (`YYYY-MM-DD`)                                                       |
 | `ticker`        | yes      | normalized to upper-case                                                      |
-| `type`          | yes      | `START`, `BUY`, or `SELL` (case-insensitive)                                  |
-| `quantity`      | yes      | decimal, positive                                                             |
-| `price`         | yes      | per-share price in `currency`, decimal, positive                              |
+| `type`          | yes      | `START`, `BUY`, `SELL`, or `TRANSFER` (case-insensitive)                     |
+| `quantity`      | yes      | decimal, non-zero. Negative only allowed for `TRANSFER` (transfer out)       |
+| `price`         | yes      | per-share price in `currency`, decimal. Ignored for `TRANSFER` with negative quantity |
 | `currency`      | no       | ISO 4217 (default `CAD`)                                                      |
 | `exchange_rate`     | no       | foreign-currency-to-CAD rate. Required for non-CAD rows; ignored for CAD rows |
 | `time`              | no       | `H:MM` or `HH:MM` (e.g. `8:00`, `15:30`). Tiebreaker when the same ticker has multiple transactions on the same date. Accuracy is not important; this is only used for ordering. |
@@ -35,6 +35,15 @@ the shares already held, `price` is their per-share ACB. At most one
 `START` per ticker, and it must come before any `BUY`/`SELL` for that
 ticker.
 
+A `TRANSFER` row records securities moved between accounts or brokerages.
+Use a **positive** quantity for a transfer in: `price` is the per-share ACB
+carried over from the source account, which is added to the running ACB pool.
+Use a **negative** quantity for a transfer out: `price` is ignored and the ACB
+is reduced proportionally (same rule as a `SELL`). No gain or loss is realized
+in either direction. **Limitation:** transfers to or from registered accounts
+(RRSP, TFSA) are deemed dispositions at fair market value under CRA rules; model
+those as a `SELL` + `BUY` pair instead.
+
 Dividend reinvestments (DRIP) should be recorded as `BUY` rows at the
 reinvestment price.
 
@@ -44,7 +53,7 @@ reinvestment price.
 
 - `amount_cad = price * quantity * exchange_rate` (total transaction amount in CAD; `price * quantity` is quantized to cents before applying the exchange rate)
 - `acb_cad` is the running ACB **in CAD** after the transaction, quantized to cents using banker's rounding
-- `gain_loss_cad` is the realized (non-denied) capital gain or loss in CAD for `SELL` transactions, quantized to cents. Zero for a fully superficial loss. Empty for `BUY` and `START` rows.
+- `gain_loss_cad` is the realized (non-denied) capital gain or loss in CAD for `SELL` transactions, quantized to cents. Zero for a fully superficial loss. Empty for all other transaction types.
 - `superficial_loss_cad` is the denied loss amount in CAD for `SELL` rows where `superficial_qty > 0`, quantized to cents. Empty otherwise.
 
 ## Translating brokerage exports
@@ -125,7 +134,8 @@ python3 -m pytest test_acb.py test_translate.py -v
 ## v1 simplifications
 
 - No commissions / outlays.
-- Only `START`, `BUY`, and `SELL` (no DRIP, ROC, splits, phantom distributions).
+- Only `START`, `BUY`, `SELL`, and `TRANSFER` (no DRIP, ROC, splits, phantom distributions).
+- Transfers to or from registered accounts (RRSP, TFSA) are deemed dispositions at FMV; model those as SELL + BUY manually.
 - Superficial loss rule is user-directed via `superficial_qty`; automatic 30-day window detection is not supported (CRA affiliated-person rules make this impossible to determine from a single account's CSV).
 - No zero-floor handling; over-selling raises a clear error.
 - ACB is always reported in CAD, so the user must supply a file with foreign-to-CAD

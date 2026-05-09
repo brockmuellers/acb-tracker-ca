@@ -822,6 +822,58 @@ def test_zero_quantity_error_includes_row_number():
         list(translate_rows(rows, AppConfig.from_dict(BASE_CONFIG)))
 
 
+def test_transfer_out_preserves_negative_quantity():
+    config = AppConfig.from_dict({
+        **BASE_CONFIG,
+        "type_map": {"BUY": "BUY", "Transfer out": "TRANSFER"},
+    })
+    rows = [make_row(**{"Txn Type": "Transfer out", "Shares": "-50", "Price ($)": "0"})]
+    result = list(translate_rows(rows, config))
+    assert result[0]["quantity"] == "-50"
+
+
+def test_transfer_out_empty_price_is_allowed():
+    config = AppConfig.from_dict({
+        **BASE_CONFIG,
+        "type_map": {"BUY": "BUY", "Transfer out": "TRANSFER"},
+    })
+    rows = [make_row(**{"Txn Type": "Transfer out", "Shares": "-50", "Price ($)": ""})]
+    result = list(translate_rows(rows, config))
+    assert result[0]["price"] == "0"
+
+
+def test_transfer_in_empty_price_defaults_to_zero_and_warns(capsys):
+    config = AppConfig.from_dict({
+        **BASE_CONFIG,
+        "type_map": {"BUY": "BUY", "Transfer in": "TRANSFER"},
+    })
+    rows = [make_row(**{"Txn Type": "Transfer in", "Shares": "50", "Price ($)": ""})]
+    result = list(translate_rows(rows, config))
+    assert result[0]["price"] == "0"
+    assert "Warning" in capsys.readouterr().err
+
+
+def test_transfer_out_empty_price_does_not_warn(capsys):
+    config = AppConfig.from_dict({
+        **BASE_CONFIG,
+        "type_map": {"BUY": "BUY", "Transfer out": "TRANSFER"},
+    })
+    rows = [make_row(**{"Txn Type": "Transfer out", "Shares": "-50", "Price ($)": ""})]
+    list(translate_rows(rows, config))
+    assert capsys.readouterr().err == ""
+
+
+def test_transfer_in_positive_quantity_still_stripped_of_sign():
+    # Transfer-in rows with positive quantity should pass through unchanged.
+    config = AppConfig.from_dict({
+        **BASE_CONFIG,
+        "type_map": {"BUY": "BUY", "Transfer in": "TRANSFER"},
+    })
+    rows = [make_row(**{"Txn Type": "Transfer in", "Shares": "50", "Price ($)": "80.00"})]
+    result = list(translate_rows(rows, config))
+    assert result[0]["quantity"] == "50"
+
+
 # --- AppConfig.from_dict ---
 
 MINIMAL_CONFIG = {"column_map": {"Date": "date", "Symbol": "ticker", "Action": "type", "Qty": "quantity", "Price": "price"}}

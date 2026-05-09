@@ -177,6 +177,90 @@ def test_two_starts_for_same_ticker_warns(capsys):
     assert "Warning" in capsys.readouterr().err
 
 
+def test_transfer_in_adds_shares_and_acb():
+    # BUY 100 @ 100 → ACB 10000; TRANSFER +50 @ 80 (per-share ACB) → ACB 14000
+    rows = [
+        tx("2024-01-01", "VFV", "BUY", 100, "100.00"),
+        tx("2024-06-01", "VFV", "TRANSFER", 50, "80.00"),
+    ]
+    out = list(compute_acb(rows))
+    assert out[1]["acb_cad"] == Decimal("14000.00")
+    assert out[1]["gain_loss_cad"] == ""
+    assert out[1]["superficial_loss_cad"] == ""
+
+
+def test_transfer_in_then_sell_uses_blended_acb():
+    # BUY 100 @ 100 → ACB 10000 (per-share 100); TRANSFER +100 @ 60 → ACB 16000 (per-share 80)
+    # SELL 100 @ 90 → proceeds 9000, ACB removed 8000 → gain 1000, remaining ACB 8000
+    rows = [
+        tx("2024-01-01", "VFV", "BUY", 100, "100.00"),
+        tx("2024-06-01", "VFV", "TRANSFER", 100, "60.00"),
+        tx("2024-09-01", "VFV", "SELL", 100, "90.00"),
+    ]
+    out = list(compute_acb(rows))
+    assert out[1]["acb_cad"] == Decimal("16000.00")
+    assert out[2]["acb_cad"] == Decimal("8000.00")
+    assert out[2]["gain_loss_cad"] == Decimal("1000.00")
+
+
+def test_transfer_out_reduces_shares_and_acb_proportionally():
+    # BUY 100 @ 100 → ACB 10000; TRANSFER -40 → removes 40% of ACB → remaining 6000
+    rows = [
+        tx("2024-01-01", "VFV", "BUY", 100, "100.00"),
+        tx("2024-06-01", "VFV", "TRANSFER", -40, "0"),
+    ]
+    out = list(compute_acb(rows))
+    assert out[1]["acb_cad"] == Decimal("6000.00")
+    assert out[1]["gain_loss_cad"] == ""
+    assert out[1]["superficial_loss_cad"] == ""
+
+
+def test_transfer_out_exceeding_holdings_raises():
+    rows = [
+        tx("2024-01-01", "VFV", "BUY", 10, "100.00"),
+        tx("2024-06-01", "VFV", "TRANSFER", -11, "0"),
+    ]
+    with pytest.raises(ValueError, match="TRANSFER of VFV on 2024-06-01 exceeds holdings"):
+        list(compute_acb(rows))
+
+
+def test_transfer_zero_quantity_raises():
+    from acb_lib import normalize_rows
+    with pytest.raises(ValueError, match="TRANSFER quantity must be non-zero"):
+        normalize_rows([{"date": "2024-01-01", "ticker": "VFV", "type": "TRANSFER",
+                         "quantity": "0", "price": "0"}])
+
+
+def test_transfer_out_then_sell_uses_reduced_acb():
+    # BUY 100 @ 100 → ACB 10000 (per-share 100); TRANSFER -50 → ACB 5000 (per-share still 100)
+    # SELL 50 @ 120 → proceeds 6000, ACB removed 5000 → gain 1000
+    rows = [
+        tx("2024-01-01", "VFV", "BUY", 100, "100.00"),
+        tx("2024-06-01", "VFV", "TRANSFER", -50, "0"),
+        tx("2024-09-01", "VFV", "SELL", 50, "120.00"),
+    ]
+    out = list(compute_acb(rows))
+    assert out[1]["acb_cad"] == Decimal("5000.00")
+    assert out[2]["gain_loss_cad"] == Decimal("1000.00")
+
+
+def test_transfer_reflected_in_holdings():
+    # A1 BUY 100 @ 100 → ACB 10000; A2 TRANSFER +50 @ 80 → ACB 14000 (150 shares, per-share 93.33...)
+    # A1 TRANSFER -20 → removes 20 * 93.33... = 1866.67, ACB → 12133.33, 130 shares remain.
+    rows = [
+        {**tx("2024-01-01", "VFV", "BUY", 100, "100.00"), "account_number": "A1"},
+        {**tx("2024-06-01", "VFV", "TRANSFER", 50, "80.00"), "account_number": "A2"},
+        {**tx("2024-09-01", "VFV", "TRANSFER", -20, "0"), "account_number": "A1"},
+    ]
+    out = list(compute_acb(rows))
+    holdings = compute_holdings(out)
+    total = next(r for r in holdings if r["account_number"] == "TOTAL")
+    assert total["quantity"] == Decimal("130")
+    assert total["acb_cad"] == Decimal("12133.33")
+    a1 = next(r for r in holdings if r["account_number"] == "A1")
+    assert a1["quantity"] == Decimal("80")
+
+
 def test_starts_for_different_tickers_are_independent():
     rows = [
         tx("2023-12-31", "VFV", "START", 100, "95.00"),

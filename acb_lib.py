@@ -62,12 +62,20 @@ def normalize_rows(rows):
             superficial_qty = sq
         else:
             superficial_qty = None
+        tx_type = row["type"].strip().upper()
+        quantity = Decimal(row["quantity"])
+        if tx_type != "TRANSFER" and quantity <= 0:
+            raise ValueError(
+                f"{ticker} on {date}: quantity must be positive for {tx_type} (got {quantity})"
+            )
+        if tx_type == "TRANSFER" and quantity == 0:
+            raise ValueError(f"{ticker} on {date}: TRANSFER quantity must be non-zero")
         result.append({
             "account_number": (row.get("account_number") or "").strip(),
             "date": date,
             "ticker": ticker,
-            "type": row["type"].strip().upper(),
-            "quantity": Decimal(row["quantity"]),
+            "type": tx_type,
+            "quantity": quantity,
             "price": Decimal(row["price"]),
             "currency": currency,
             "exchange_rate": exchange_rate,
@@ -105,7 +113,7 @@ def compute_acb(rows):
         # (all BUY or all SELL) are order-independent and don't need timestamps.
         if len(txs) > 1 and len(types) > 1 and not all(tx["time"] for tx in txs):
             print(
-                f"{YELLOW}Warning: mixed BUY and SELL transactions for {ticker} on {date} — "
+                f"{YELLOW}Warning: mixed transaction types for {ticker} on {date} — "
                 f"add a 'time' column to control their order{RESET}",
                 file=sys.stderr, flush=True,
             )
@@ -138,6 +146,19 @@ def compute_acb(rows):
         if tx_type in ("START", "BUY"):
             shares += qty
             total_acb += amount_cad
+        elif tx_type == "TRANSFER":
+            if qty > 0:
+                shares += qty
+                total_acb += amount_cad
+            else:
+                out_qty = -qty
+                if out_qty > shares:
+                    raise ValueError(
+                        f"TRANSFER of {ticker} on {tx['date']} exceeds holdings: {out_qty} > {shares}"
+                    )
+                acb_per_share = total_acb / shares
+                total_acb -= out_qty * acb_per_share
+                shares -= out_qty
         elif tx_type == "SELL":
             if qty > shares:
                 raise ValueError(
@@ -234,6 +255,8 @@ def compute_holdings(output_rows):
             per_account_qty[key] += qty
         elif tx_type == "SELL":
             per_account_qty[key] -= qty
+        elif tx_type == "TRANSFER":
+            per_account_qty[key] += qty  # qty is signed: positive = in, negative = out
 
         ticker_acb[ticker] = row["acb_cad"]
 
