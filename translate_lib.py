@@ -273,16 +273,8 @@ def translate_rows(rows, config: AppConfig):
         # that stores quantity in a non-standard column silently producing 0-share rows).
         # Exception: price is ignored for TRANSFER-out rows, so empty/missing price is fine.
         is_transfer = out.get("type") == "TRANSFER"
-        is_transfer_out = is_transfer and out.get("quantity", "").startswith("-")
         if is_transfer and not out.get("price"):
             out["price"] = "0"
-            if not is_transfer_out:
-                print(
-                    f"{YELLOW}Warning: TRANSFER (in) of {out.get('ticker', '?')} on "
-                    f"{out.get('date', '?')} has no price — the transferred shares will carry "
-                    f"0 ACB. Set 'price' to the per-share ACB of the incoming shares.{RESET}",
-                    file=sys.stderr, flush=True,
-                )
         loc = f"row {row_num} ({out.get('ticker', '?')} on {out.get('date', '?')})"
         for col in ("quantity", "price"):
             if col in out:

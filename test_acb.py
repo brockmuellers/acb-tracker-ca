@@ -261,6 +261,56 @@ def test_transfer_reflected_in_holdings():
     assert a1["quantity"] == Decimal("80")
 
 
+def test_transfer_auto_match_propagates_acb():
+    # A1 BUY 100 @ 100 → ACB 10000 (per-share 100); same-day TRANSFER-out 40 from A1, TRANSFER-in 40 to A2.
+    # Auto-match should propagate per-share ACB 100 → TRANSFER-in amount_cad = 4000.
+    # After: 100 shares total, ACB still 10000.
+    rows = [
+        {**tx("2024-01-01", "VFV", "BUY", 100, "100.00"), "account_number": "A1"},
+        {**tx("2024-06-01", "VFV", "TRANSFER", -40, "0"), "account_number": "A1"},
+        {**tx("2024-06-01", "VFV", "TRANSFER", 40, "0"), "account_number": "A2"},
+    ]
+    out = list(compute_acb(rows))
+    assert out[2]["acb_cad"] == Decimal("10000.00")
+    assert out[2]["price"] == Decimal("100.00")
+
+
+def test_transfer_auto_match_price_reflects_blended_acb():
+    # BUY 100 @ 100 + BUY 100 @ 60 → 200 shares, ACB 16000 (per-share 80).
+    # TRANSFER-out 50, TRANSFER-in 50 same day → should propagate 80/share.
+    rows = [
+        tx("2024-01-01", "VFV", "BUY", 100, "100.00"),
+        tx("2024-03-01", "VFV", "BUY", 100, "60.00"),
+        tx("2024-06-01", "VFV", "TRANSFER", -50, "0"),
+        tx("2024-06-01", "VFV", "TRANSFER", 50, "0"),
+    ]
+    out = list(compute_acb(rows))
+    assert out[3]["acb_cad"] == Decimal("16000.00")
+    assert out[3]["price"] == Decimal("80.00")
+
+
+def test_transfer_in_no_match_prints_warning(capsys):
+    # TRANSFER-in with no corresponding TRANSFER-out should warn regardless of price value.
+    rows = [tx("2024-06-01", "VFV", "TRANSFER", 50, "80.00")]
+    list(compute_acb(rows))
+    assert "no matching TRANSFER-out" in capsys.readouterr().err
+
+
+def test_transfer_auto_match_sell_after_uses_propagated_acb():
+    # A1 BUY 100 @ 100, transfer all to A2 same day; A2 sells 50 @ 120.
+    # Per-share ACB should be 100 → gain on 50-share sale = 50*(120-100) = 1000.
+    rows = [
+        {**tx("2024-01-01", "VFV", "BUY", 100, "100.00"), "account_number": "A1"},
+        {**tx("2024-06-01", "VFV", "TRANSFER", -100, "0"), "account_number": "A1"},
+        {**tx("2024-06-01", "VFV", "TRANSFER", 100, "0"), "account_number": "A2"},
+        {**tx("2024-09-01", "VFV", "SELL", 50, "120.00"), "account_number": "A2"},
+    ]
+    out = list(compute_acb(rows))
+    sell_row = out[3]
+    assert sell_row["gain_loss_cad"] == Decimal("1000.00")
+    assert sell_row["acb_cad"] == Decimal("5000.00")
+
+
 def test_starts_for_different_tickers_are_independent():
     rows = [
         tx("2023-12-31", "VFV", "START", 100, "95.00"),

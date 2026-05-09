@@ -100,8 +100,16 @@ def compute_acb(rows):
     Per-ticker state is (shares, total_acb), both Decimal and always CAD.
     """
     holdings = {}  # ticker -> [shares, total_acb]
-    # Sort by date, then time (empty string sorts before any HH:MM), then original input order.
-    ordered = sorted(enumerate(rows), key=lambda p: (p[1]["date"], p[1]["time"], p[0]))
+    transfer_out_acb = {}  # (ticker, date, abs_qty) -> [acb_per_share, ...] FIFO
+
+    # Sort by date, then time (empty string sorts before any HH:MM), then
+    # TRANSFER-out before TRANSFER-in within the same (date, time), then original input order.
+    def _sort_key(p):
+        tx = p[1]
+        transfer_order = 0 if (tx["type"] == "TRANSFER" and tx["quantity"] < 0) else 1
+        return (tx["date"], tx["time"], transfer_order, p[0])
+
+    ordered = sorted(enumerate(rows), key=_sort_key)
 
     # Warn once per (ticker, date) group that has multiple transactions but incomplete timestamps.
     groups: dict[tuple, list] = {}
@@ -148,6 +156,20 @@ def compute_acb(rows):
             total_acb += amount_cad
         elif tx_type == "TRANSFER":
             if qty > 0:
+                key = (ticker, tx["date"], qty)
+                pool = transfer_out_acb.get(key)
+                if pool:
+                    matched_acb_per_share = pool.pop(0)
+                    amount_cad = matched_acb_per_share * qty
+                    price = matched_acb_per_share
+                else:
+                    print(
+                        f"{YELLOW}Warning: TRANSFER-in of {qty} shares of {ticker} on "
+                        f"{tx['date']} has no matching TRANSFER-out in any tracked account "
+                        f"— ensure that 'price' accurately reflects the per-share ACB of "
+                        f"the incoming shares{RESET}",
+                        file=sys.stderr, flush=True,
+                    )
                 shares += qty
                 total_acb += amount_cad
             else:
@@ -157,6 +179,7 @@ def compute_acb(rows):
                         f"TRANSFER of {ticker} on {tx['date']} exceeds holdings: {out_qty} > {shares}"
                     )
                 acb_per_share = total_acb / shares
+                transfer_out_acb.setdefault((ticker, tx["date"], out_qty), []).append(acb_per_share)
                 total_acb -= out_qty * acb_per_share
                 shares -= out_qty
         elif tx_type == "SELL":

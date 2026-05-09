@@ -842,7 +842,8 @@ def test_transfer_out_empty_price_is_allowed():
     assert result[0]["price"] == "0"
 
 
-def test_transfer_in_empty_price_defaults_to_zero_and_warns(capsys):
+def test_transfer_in_empty_price_defaults_to_zero_silently(capsys):
+    # translate_lib no longer warns on missing price; acb_lib handles it after matching
     config = AppConfig.from_dict({
         **BASE_CONFIG,
         "type_map": {"BUY": "BUY", "Transfer in": "TRANSFER"},
@@ -850,7 +851,7 @@ def test_transfer_in_empty_price_defaults_to_zero_and_warns(capsys):
     rows = [make_row(**{"Txn Type": "Transfer in", "Shares": "50", "Price ($)": ""})]
     result = list(translate_rows(rows, config))
     assert result[0]["price"] == "0"
-    assert "Warning" in capsys.readouterr().err
+    assert capsys.readouterr().err == ""
 
 
 def test_transfer_out_empty_price_does_not_warn(capsys):
