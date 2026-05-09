@@ -305,21 +305,23 @@ def compute_holdings(output_rows):
                 acct_acb = (acct_qty / total_qty * total_acb).quantize(CENTS, rounding=ROUND_HALF_EVEN)
             else:
                 acct_acb = Decimal("0.00")
-            rows.append({
-                "account_number": acct,
-                "ticker": ticker,
-                "quantity": acct_qty,
-                "acb_cad": acct_acb,
-            })
+            if acct_qty != 0:
+                rows.append({
+                    "account_number": acct,
+                    "ticker": ticker,
+                    "quantity": acct_qty,
+                    "acb_cad": acct_acb,
+                })
 
     # TOTAL rows at the end, sorted by ticker.
     for ticker in all_tickers:
-        rows.append({
-            "account_number": "TOTAL",
-            "ticker": ticker,
-            "quantity": ticker_total_qty[ticker],
-            "acb_cad": ticker_acb[ticker],
-        })
+        if ticker_total_qty[ticker] != 0:
+            rows.append({
+                "account_number": "TOTAL",
+                "ticker": ticker,
+                "quantity": ticker_total_qty[ticker],
+                "acb_cad": ticker_acb[ticker],
+            })
 
     return rows
 

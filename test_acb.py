@@ -505,12 +505,7 @@ def test_holdings_fully_sold_zero_quantity():
     ]
     output_rows = list(compute_acb(rows))
     holdings = compute_holdings(output_rows)
-    assert len(holdings) == 2
-    assert holdings[0]["quantity"] == Decimal("0")
-    assert holdings[0]["acb_cad"] == Decimal("0.00")
-    assert holdings[1]["account_number"] == "TOTAL"
-    assert holdings[1]["quantity"] == Decimal("0")
-    assert holdings[1]["acb_cad"] == Decimal("0.00")
+    assert holdings == []
 
 
 def test_holdings_tickers_sorted_alphabetically():
