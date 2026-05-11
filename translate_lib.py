@@ -16,8 +16,9 @@ ACB_INPUT_COLUMNS = ["account_number", "date", "ticker", "type", "quantity", "pr
 REQUIRED_COLUMNS = ["date", "ticker", "type", "quantity", "price"]
 FX_COL_RE = re.compile(r"^FX([A-Z]{3})CAD$")
 
-_VALID_CONFIG_KEYS = frozenset({"column_map", "optional_columns", "type_map", "skip_types", "date_format", "defaults", "sweep_types"})
+_VALID_CONFIG_KEYS = frozenset({"column_map", "optional_columns", "type_map", "skip_types", "date_format", "defaults", "sweep_types", "cash_type_map"})
 _VALID_SWEEP_KEYS = frozenset({"types", "quantity_col", "price_override"})
+_VALID_CASH_TYPE_MAP_KEYS = frozenset({"types", "ticker_fallback_types", "quantity_col"})
 
 
 class ConfigurationError(ValueError):
@@ -66,6 +67,63 @@ class SweepConfig:
 
 
 @dataclass
+class CashTypeMapConfig:
+    types: dict[str, str]                  # broker_type → CASH-IN or CASH-OUT (always cash)
+    ticker_fallback_types: dict[str, str]  # broker_type → CASH-IN or CASH-OUT (cash only when ticker is empty)
+    quantity_col: str
+
+    @classmethod
+    def from_dict(cls, data: dict, config_path: str) -> "CashTypeMapConfig":
+        unknown = sorted(set(data) - _VALID_CASH_TYPE_MAP_KEYS)
+        if unknown:
+            raise ConfigurationError(
+                f"{config_path}: cash_type_map has unknown key(s) {unknown}\n"
+                f"Valid cash_type_map keys: {sorted(_VALID_CASH_TYPE_MAP_KEYS)}"
+            )
+        valid_cash_types = {"CASH-IN", "CASH-OUT"}
+
+        def _parse_type_dict(key):
+            d = data.get(key)
+            if d is None:
+                return {}
+            if not isinstance(d, dict) or not d:
+                raise ConfigurationError(f"{config_path}: cash_type_map.'{key}' must be a non-empty dict")
+            for broker_type, acb_type in d.items():
+                if not isinstance(broker_type, str) or not isinstance(acb_type, str):
+                    raise ConfigurationError(
+                        f"{config_path}: cash_type_map.'{key}' keys and values must be strings "
+                        f"(got {broker_type!r}: {acb_type!r})"
+                    )
+                if acb_type not in valid_cash_types:
+                    raise ConfigurationError(
+                        f"{config_path}: cash_type_map.'{key}' value {acb_type!r} is not valid — "
+                        f"must be one of {sorted(valid_cash_types)}"
+                    )
+            return dict(d)
+
+        types = _parse_type_dict("types")
+        ticker_fallback_types = _parse_type_dict("ticker_fallback_types")
+
+        if not types and not ticker_fallback_types:
+            raise ConfigurationError(
+                f"{config_path}: cash_type_map must have at least one of 'types' or 'ticker_fallback_types'"
+            )
+
+        overlap = set(types) & set(ticker_fallback_types)
+        if overlap:
+            raise ConfigurationError(
+                f"{config_path}: broker type(s) {sorted(overlap)} appear in both "
+                f"cash_type_map.'types' and cash_type_map.'ticker_fallback_types' — "
+                f"a type can only belong to one"
+            )
+
+        quantity_col = data.get("quantity_col")
+        if not isinstance(quantity_col, str) or not quantity_col:
+            raise ConfigurationError(f"{config_path}: cash_type_map.'quantity_col' must be a non-empty string")
+        return cls(types=types, ticker_fallback_types=ticker_fallback_types, quantity_col=quantity_col)
+
+
+@dataclass
 class AppConfig:
     column_map: dict[str, str]
     optional_columns: set[str] = field(default_factory=set)
@@ -74,6 +132,8 @@ class AppConfig:
     date_format: str | None = None
     defaults: dict[str, str] = field(default_factory=dict)
     sweep: SweepConfig | None = None
+    cash_ticker: str | None = None
+    cash_type_map: CashTypeMapConfig | None = None
 
     @classmethod
     def from_dict(cls, data: dict, config_path: str = "config") -> "AppConfig":
@@ -128,6 +188,7 @@ class AppConfig:
             if not isinstance(df, str):
                 raise ConfigurationError(f"{p}: 'date_format' must be a string (got {type(df).__name__})")
 
+        cash_ticker = None
         if "defaults" in data:
             d = data["defaults"]
             if not isinstance(d, dict):
@@ -137,6 +198,7 @@ class AppConfig:
                     raise ConfigurationError(
                         f"{p}: 'defaults' keys and values must be strings (got {k!r}: {v!r})"
                     )
+            cash_ticker = d.get("cash_ticker") or None
 
         sweep = None
         if "sweep_types" in data:
@@ -145,14 +207,37 @@ class AppConfig:
                 raise ConfigurationError(f"{p}: 'sweep_types' must be a dict (got {type(sw).__name__})")
             sweep = SweepConfig.from_dict(sw, config_path)
 
+        cash_type_map = None
+        if "cash_type_map" in data:
+            ctm = data["cash_type_map"]
+            if not isinstance(ctm, dict):
+                raise ConfigurationError(f"{p}: 'cash_type_map' must be a dict (got {type(ctm).__name__})")
+            cash_type_map = CashTypeMapConfig.from_dict(ctm, config_path)
+            if not cash_ticker:
+                raise ConfigurationError(
+                    f"{p}: 'cash_type_map' requires 'defaults.cash_ticker' to be set"
+                )
+            if sweep:
+                overlap = sweep.types & set(cash_type_map.types)
+                if overlap:
+                    raise ConfigurationError(
+                        f"{p}: type(s) {sorted(overlap)} appear in both sweep_types and cash_type_map — "
+                        f"a type can only belong to one"
+                    )
+
+        # cash_ticker is kept separate and not applied as a generic column default
+        generic_defaults = {k: v for k, v in data.get("defaults", {}).items() if k != "cash_ticker"}
+
         return cls(
             column_map=cm,
             optional_columns=set(data.get("optional_columns", [])),
             type_map=data.get("type_map", {}),
             skip_types=set(data.get("skip_types", [])),
             date_format=data.get("date_format"),
-            defaults=data.get("defaults", {}),
+            defaults=generic_defaults,
             sweep=sweep,
+            cash_ticker=cash_ticker,
+            cash_type_map=cash_type_map,
         )
 
 
@@ -164,8 +249,8 @@ def load_config(config_path: str) -> AppConfig:
     return AppConfig.from_dict(data, config_path)
 
 
-def validate_column_map(column_map, csv_headers, config_path="config", sweep_quantity_col=None, optional_columns=None):
-    """Raise if any required column_map key (or sweep_types.quantity_col) is absent from the CSV headers.
+def validate_column_map(column_map, csv_headers, config_path="config", sweep_quantity_col=None, cash_quantity_col=None, optional_columns=None):
+    """Raise if any required column_map key (or sweep/cash quantity_col) is absent from the CSV headers.
 
     Columns whose broker name is in optional_columns are skipped silently if absent.
     """
@@ -174,6 +259,8 @@ def validate_column_map(column_map, csv_headers, config_path="config", sweep_qua
     missing = [k for k in column_map if k not in csv_col_set and k not in optional]
     if sweep_quantity_col and sweep_quantity_col not in csv_col_set:
         missing.append(f"{sweep_quantity_col} (sweep_types)")
+    if cash_quantity_col and cash_quantity_col not in csv_col_set:
+        missing.append(f"{cash_quantity_col} (cash_type_map)")
     if missing:
         raise ConfigurationError(
             f"{config_path}: columns not found in CSV: {missing}\n"
@@ -188,106 +275,174 @@ def clean_number(s):
 
 
 def translate_rows(rows, config: AppConfig):
-    """Yield translated row dicts, one per input row."""
+    """Yield translated row dicts.
+
+    cash_type_map.types (always-cash): always emits a cash row; if the type also
+    appears in type_map, a security row is emitted first (dual emission).
+
+    cash_type_map.ticker_fallback_types (conditional): routes based on ticker presence.
+    Non-empty ticker → security row only (via type_map).  Empty ticker → cash row only.
+    """
     column_map = config.column_map
     type_map = config.type_map
     skip_types = config.skip_types
     date_format = config.date_format
     defaults = config.defaults
     sweep = config.sweep
+    cash_type_map = config.cash_type_map
+    cash_ticker = config.cash_ticker
 
     # start=2: DictReader consumed row 1 as the header, so first data row is spreadsheet row 2
     for row_num, row in enumerate(rows, start=2):
-        out = {}
-
         # Rename columns; drop anything not in column_map.
+        base = {}
         for broker_col, acb_col in column_map.items():
             if broker_col in row:
-                out[acb_col] = row[broker_col]
+                base[acb_col] = row[broker_col]
 
         # Raise early if the type column is present but blank.
-        if "type" in out and not out["type"].strip():
+        if "type" in base and not base["type"].strip():
             raise TranslationError(
                 f"row {row_num}: 'type' column is blank — check the column mapped to 'type' in column_map"
             )
 
+        raw_type = base.get("type", "")
+
         # Drop rows whose raw type value is in skip_types.
-        if skip_types and out.get("type") in skip_types:
+        if skip_types and raw_type in skip_types:
             continue
 
-        # Drop rows with no ticker — cash-only or metadata rows that aren't security transactions.
-        if "ticker" in out and not out["ticker"].strip():
-            continue
+        # Determine which maps claim this type.
+        # ticker_fallback: routing decided later once we know whether the ticker is empty.
+        in_cash_always = cash_type_map is not None and raw_type in cash_type_map.types
+        in_cash_fallback = cash_type_map is not None and raw_type in cash_type_map.ticker_fallback_types
 
-        # Clean numeric fields. Quantity is always positive (sign encoded in type),
-        # except for TRANSFER rows where negative quantity means transfer out.
-        for col in ("price", "quantity"):
-            if col in out:
-                out[col] = clean_number(out[col])
-        if "quantity" in out:
-            resolves_to_transfer = type_map.get(out.get("type", "")) == "TRANSFER"
-            if not resolves_to_transfer:
-                out["quantity"] = out["quantity"].lstrip("-")
+        # When type_map is empty all types pass through unchanged (backward-compatible).
+        # When type_map is non-empty the type must appear in type_map or cash_type_map.
+        in_type_map = not bool(type_map) or raw_type in type_map
 
-        # Sweep type override: some brokers store quantity/price in alternate columns for
-        # sweep transaction types (e.g. Vanguard puts dollar amount in Net Amount for sweeps).
-        # Checked against the raw broker type value, before type_map remapping.
-        if sweep and out.get("type") in sweep.types:
-            if sweep.quantity_col:
-                col = sweep.quantity_col
-                if col not in row:
-                    raise TranslationError(
-                        f"row {row_num}: sweep_types quantity_col {col!r} not found in row"
-                    )
-                out["quantity"] = clean_number(row[col]).lstrip("-")
-            if sweep.price_override:
-                out["price"] = sweep.price_override
+        if bool(type_map) and raw_type not in type_map and not in_cash_always and not in_cash_fallback:
+            raise TranslationError(
+                f"row {row_num}: unknown type value {raw_type!r} — "
+                f"add it to type_map, cash_type_map, or skip_types in your mapping config"
+            )
 
-        # Remap type values.
-        if type_map and "type" in out:
-            raw = out["type"]
-            if raw not in type_map:
-                raise TranslationError(
-                    f"row {row_num}: unknown type value {raw!r} — add it to type_map in your mapping config"
-                )
-            out["type"] = type_map[raw]
-
-        # Convert date format to ISO 8601.
-        if date_format and "date" in out:
-            raw_date = out["date"]
+        # Convert date format to ISO 8601 once, shared by both output rows.
+        if date_format and "date" in base:
+            raw_date = base["date"]
             try:
-                out["date"] = datetime.strptime(raw_date, date_format).strftime("%Y-%m-%d")
+                base["date"] = datetime.strptime(raw_date, date_format).strftime("%Y-%m-%d")
             except ValueError:
                 raise TranslationError(
-                    f"row {row_num} ({out.get('ticker', '?')}): date {raw_date!r} does not match "
+                    f"row {row_num} ({base.get('ticker', '?')}): date {raw_date!r} does not match "
                     f"format {date_format!r} (hint: use %Y for 4-digit year, %y for 2-digit)"
                 )
 
-        # Fill defaults for missing or empty columns.
-        for col, val in defaults.items():
-            if not out.get(col):
-                out[col] = val
+        # For ticker_fallback_types, routing depends on whether the ticker is present.
+        # Resolve this now (after defaults would be applied) by peeking at the raw ticker.
+        # Defaults are applied inside the security/cash branches, so check the raw base value.
+        raw_ticker = base.get("ticker", "").strip()
+        if in_cash_fallback:
+            if raw_ticker:
+                # Ticker present: treat exactly like a type_map entry; no cash row.
+                in_type_map = True
+                in_cash_fallback = False
+            else:
+                # Ticker absent: emit only a cash row; suppress the security row.
+                in_type_map = False
 
-        # Validate that quantity and price are non-zero after all transformations.
-        # This is the primary safeguard against column mapping mis-configurations (e.g. a broker
-        # that stores quantity in a non-standard column silently producing 0-share rows).
-        # Exception: price is ignored for TRANSFER-out rows, so empty/missing price is fine.
-        is_transfer = out.get("type") == "TRANSFER"
-        if is_transfer and not out.get("price"):
-            out["price"] = "0"
-        loc = f"row {row_num} ({out.get('ticker', '?')} on {out.get('date', '?')})"
-        for col in ("quantity", "price"):
-            if col in out:
-                try:
-                    val = float(out[col])
-                except (ValueError, TypeError):
-                    raise TranslationError(f"{loc}: {col} {out[col]!r} is not a valid number")
-                if val == 0 and not (col == "price" and is_transfer):
-                    raise TranslationError(
-                        f"{loc}: {col} is 0 — check your column_map or sweep_types config"
-                    )
+        # --- Security row (emitted first) ---
+        if in_type_map:
+            sec = dict(base)
 
-        yield out
+            # Fill defaults for missing or empty columns.
+            for col, val in defaults.items():
+                if not sec.get(col):
+                    sec[col] = val
+
+            # Skip the security row if ticker is empty; the cash row (if any) still runs.
+            if sec.get("ticker", "").strip():
+                # Clean numeric fields. Quantity is always positive (sign encoded in type),
+                # except for TRANSFER rows where negative quantity means transfer out.
+                for col in ("price", "quantity"):
+                    if col in sec:
+                        sec[col] = clean_number(sec[col])
+                if "quantity" in sec:
+                    resolves_to_transfer = type_map.get(raw_type) == "TRANSFER"
+                    if not resolves_to_transfer:
+                        sec["quantity"] = sec["quantity"].lstrip("-")
+
+                # Sweep type override: some brokers store quantity/price in alternate columns.
+                # Checked against the raw broker type value, before type_map remapping.
+                if sweep and raw_type in sweep.types:
+                    if sweep.quantity_col:
+                        col = sweep.quantity_col
+                        if col not in row:
+                            raise TranslationError(
+                                f"row {row_num}: sweep_types quantity_col {col!r} not found in row"
+                            )
+                        sec["quantity"] = clean_number(row[col]).lstrip("-")
+                    if sweep.price_override:
+                        sec["price"] = sweep.price_override
+
+                if type_map:
+                    sec["type"] = type_map[raw_type]
+
+                # Validate that quantity and price are non-zero after all transformations.
+                is_transfer = sec.get("type") == "TRANSFER"
+                if is_transfer and not sec.get("price"):
+                    sec["price"] = "0"
+                loc = f"row {row_num} ({sec.get('ticker', '?')} on {sec.get('date', '?')})"
+                for col in ("quantity", "price"):
+                    if col in sec:
+                        try:
+                            val = float(sec[col])
+                        except (ValueError, TypeError):
+                            raise TranslationError(f"{loc}: {col} {sec[col]!r} is not a valid number")
+                        if val == 0 and not (col == "price" and is_transfer):
+                            raise TranslationError(
+                                f"{loc}: {col} is 0 — check your column_map or sweep_types config"
+                            )
+
+                yield sec
+
+        # --- Cash row (emitted after security row) ---
+        if in_cash_always or in_cash_fallback:
+            cash = dict(base)
+
+            # Fill defaults for missing or empty columns (cash_ticker applied separately).
+            for col, val in defaults.items():
+                if not cash.get(col):
+                    cash[col] = val
+
+            qcol = cash_type_map.quantity_col
+            if qcol not in row:
+                raise TranslationError(
+                    f"row {row_num}: cash_type_map quantity_col {qcol!r} not found in row"
+                )
+            raw_qty = clean_number(row[qcol]).lstrip("-")
+            if not raw_qty:
+                raise TranslationError(
+                    f"row {row_num}: cash_type_map quantity_col {qcol!r} is empty"
+                )
+            try:
+                qty_val = float(raw_qty)
+            except ValueError:
+                raise TranslationError(
+                    f"row {row_num}: cash quantity {raw_qty!r} is not a valid number"
+                )
+            if qty_val == 0:
+                raise TranslationError(
+                    f"row {row_num}: cash quantity is 0 — check cash_type_map.quantity_col {qcol!r}"
+                )
+
+            cash["ticker"] = cash_ticker
+            cash_acb_type = cash_type_map.types.get(raw_type) or cash_type_map.ticker_fallback_types[raw_type]
+            cash["type"] = cash_acb_type
+            cash["quantity"] = raw_qty
+            cash["price"] = "1.0"
+
+            yield cash
 
 
 def filter_by_date(rows, start, end):
@@ -393,7 +548,8 @@ def translate_file(input_path, mapping_path, start=None, end=None, fx_rates=None
         raw_rows = list(csv.DictReader(f))
     if raw_rows:
         sweep_quantity_col = config.sweep.quantity_col if config.sweep else None
-        validate_column_map(config.column_map, raw_rows[0].keys(), mapping_path, sweep_quantity_col, config.optional_columns)
+        cash_quantity_col = config.cash_type_map.quantity_col if config.cash_type_map else None
+        validate_column_map(config.column_map, raw_rows[0].keys(), mapping_path, sweep_quantity_col, cash_quantity_col, config.optional_columns)
     rows = validate_columns(translate_rows(raw_rows, config))
     rows = filter_by_date(rows, start, end)
     if fx_rates:
