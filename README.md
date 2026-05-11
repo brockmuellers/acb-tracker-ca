@@ -1,13 +1,17 @@
 # acb-tracker-ca
 
 A small Python script that computes the running Adjusted Cost Base (ACB)
-for Canadian CRA tax reporting from a CSV of transactions.
+for Canadian CRA tax reporting from CSVs of transactions.
+
+Designed to handle transactions from US brokerages, whose cost basis calculations follow IRS rules, not CRA rules.
 
 ### Disclaimer
 
 This tool does not constitute professional tax advice. Use at your own risk.
 
 ## Usage
+
+TODO: update with run.py instructions.
 
 ```
 python3 acb.py transactions.csv [more.csv ...] [-o output.csv]
@@ -49,12 +53,18 @@ reinvestment price.
 
 ## Output columns
 
+### ACB
+
 `date, ticker, type, quantity, price, currency, exchange_rate, amount_cad, acb_cad, gain_loss_cad, superficial_loss_cad`
 
 - `amount_cad = price * quantity * exchange_rate` (total transaction amount in CAD; `price * quantity` is quantized to cents before applying the exchange rate)
 - `acb_cad` is the running ACB **in CAD** after the transaction, quantized to cents using banker's rounding
 - `gain_loss_cad` is the realized (non-denied) capital gain or loss in CAD for `SELL` transactions, quantized to cents. Zero for a fully superficial loss. Empty for all other transaction types.
 - `superficial_loss_cad` is the denied loss amount in CAD for `SELL` rows where `superficial_qty > 0`, quantized to cents. Empty otherwise.
+
+### Holdings
+
+The program calculates expected holdings across accounts at the end of the transaction period. Useful for checking that all transactions were correctly mapped.
 
 ## Translating brokerage exports
 
@@ -69,6 +79,8 @@ python3 translate.py <broker_export.csv> <mapping.yaml> [-o output.csv]
 
 Ready-to-use mappings can be found in `mappings/`.
 
+Brokerage exports date ranges do not need to match the date range of interest; only transactions between the `--start` and `--end` dates will be translated.
+
 **Note:** some brokerage exports include a summary block above the actual transaction table
 (e.g. Vanguard prepends a portfolio holdings section before the trade history). If the first
 row of your CSV is not the correct column header, delete the extra rows manually before running
@@ -77,7 +89,7 @@ row of your CSV is not the correct column header, delete the extra rows manually
 ### Automatic exchange rates (`--fx-dir`)
 
 For non-CAD transactions, `acb.py` requires an `exchange_rate` column. `translate.py` can look
-this up automatically from Bank of Canada daily FX rate files.
+this up from Bank of Canada daily FX rate files.
 
 1. Go to <https://www.bankofcanada.ca/rates/exchange/daily-exchange-rates-lookup/>
 2. Select the currency pair (e.g. USD/CAD), choose your date range, and download the CSV
@@ -99,6 +111,8 @@ Notes:
 
 ### Sweep transaction types (`sweep_types`)
 
+ACB must be tracked for USD settlement funds, due to fluctuating exchange rates.
+
 Some brokers (e.g. Vanguard) store quantity and price in non-standard columns for sweep
 transaction types in settlement funds. For example, Vanguard's "Sweep in" and "Sweep out" rows always show
 `Shares=0` — the actual dollar amount is in `Net Amount`.
@@ -119,14 +133,21 @@ sweep_types:
 - `quantity_col` — broker column name to use as quantity instead of the mapped column (sign is stripped; absolute value is used)
 - `price_override` — literal price to use (omit if the mapped price column is already correct)
 
-A ready-to-use Vanguard mapping including this config is in `mappings/vanguard.yaml`.
-
 ### Dates
 
 If a brokerage export includes both "transaction date" and "settlement date", use "settlement date".
 
+### Column enrichment
+
+Based on feedback from the ACB calculator, it may be necessary to manually add additional columns to the brokerage export. For example, `time` is added to fix unclear transaction order, and `superficial_qty` is added to designate losses as either allowed or superficial.
+
+### Starting values
+
+Holdings at the start of the period of interest can be manually added in a CSV file as `START` transactions. The "price" column should represent cost basis on the starting date.
+
 ## Tests
 
+TODO: update this
 ```
 python3 -m pytest test_acb.py test_translate.py -v
 ```
@@ -134,16 +155,18 @@ python3 -m pytest test_acb.py test_translate.py -v
 ## v1 simplifications
 
 - No commissions / outlays.
-- Only `START`, `BUY`, `SELL`, and `TRANSFER` (no DRIP, ROC, splits, phantom distributions).
-- Transfers to or from registered accounts (RRSP, TFSA) are deemed dispositions at FMV; model those as SELL + BUY manually.
+- Only START, `BUY`, SELL, and TRANSFER are supported
+  - DRIP must be modeled as `BUY`/`SELL` pairs.
+  - No splits or phantom distributions.
+  - Return of Capital (RoC) is not supported. Note that US brokerages may not have unique transaction types representing RoC distributions; instead, distributions may not be classified as RoC until the end of the year. Any RoC amount will be reflected as a non-zero value on box 3 of the 1099-DIV, and a transaction breakdown will be found in the supplemental details.
+  - Transfers to or from registered accounts (RRSP, TFSA) are deemed dispositions at FMV; model those as SELL + BUY manually.
+  - ETF conversion (assuming we treat ETF conversion as a tax-deferred action) must be treated as BUY/SELL with manually calculated amounts that correctly transfer cost basis.
 - Superficial loss rule is user-directed via `superficial_qty`; automatic 30-day window detection is not supported (CRA affiliated-person rules make this impossible to determine from a single account's CSV).
 - No zero-floor handling; over-selling raises a clear error.
-- ACB is always reported in CAD, so the user must supply a file with foreign-to-CAD
-  exchange rate. No FX rate file lookup, auto-inversion, or cross-currency
-  chaining.
-- No explicit tracking or verification of current holdings by account. This would be useful for checking that all transactions are correctly handled in mappings.
+- No FX rate lookup; the user must supply the file.
 - Tracking cash holdings.
 - Transaction notes / comments.
+- Automated holding verification against an input file.
 - Row de-duplication.
+- Only "price" is translated for transactions, not "amount", even though "amount" is typically the more important value and less susceptible to rounding inaccuracy.
 - Potentially inconsistent currency rounding - values may be inaccurate by a few cents.
-- ETF conversion (assuming we treat ETF conversion as a tax-deferred action) must be treated as BUY/SELL with manually calculated amounts that correctly transfer cost basis.
