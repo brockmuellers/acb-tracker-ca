@@ -33,7 +33,8 @@ from pathlib import Path
 import yaml
 from tabulate import tabulate
 
-from acb_lib import compute_acb, compute_holdings, normalize_rows, write_csv, write_holdings_csv
+from acb_lib import GREEN, RESET, YELLOW, compute_acb, compute_holdings, normalize_rows, write_csv, write_holdings_csv
+from check_holdings import diff_holdings, load_holdings
 from translate_lib import (
     ConfigurationError,
     FXRateError,
@@ -42,7 +43,7 @@ from translate_lib import (
     translate_file,
 )
 
-_VALID_RUN_KEYS = frozenset({"sources", "output", "output_holdings", "fx_dir", "start", "end"})
+_VALID_RUN_KEYS = frozenset({"sources", "output", "output_holdings", "expected_holdings", "fx_dir", "start", "end"})
 _VALID_SOURCE_KEYS = frozenset({"input", "mapping", "account_number"})
 
 
@@ -173,7 +174,7 @@ def main():
             write_csv(output_rows, f)
 
     holdings_rows = None
-    if run_config.get("output_holdings") or args.pretty:
+    if run_config.get("output_holdings") or run_config.get("expected_holdings") or args.pretty:
         holdings_rows = compute_holdings(output_rows)
 
     if run_config.get("output_holdings"):
@@ -188,6 +189,28 @@ def main():
         print(tabulate(holdings_rows, headers="keys", tablefmt="grid", floatfmt="s"))
     elif not args.output and not run_config.get("output"):
         write_csv(output_rows, sys.stdout)
+
+    if run_config.get("expected_holdings"):
+        expected_path = _resolve(base_dir, run_config["expected_holdings"])
+        actual = {
+            (r["account_number"], r["ticker"]): {
+                "quantity": str(r["quantity"]),
+                "acb_cad": str(r["acb_cad"]),
+            }
+            for r in holdings_rows
+        }
+        try:
+            expected = load_holdings(str(expected_path))
+        except OSError as e:
+            print(f"Holdings check error: {e}", file=sys.stderr)
+            sys.exit(1)
+        diffs = diff_holdings(expected, actual)
+        if diffs:
+            print(f"{YELLOW}Holdings differ ({len(diffs)} difference(s)):{RESET}", file=sys.stderr)
+            for line in diffs:
+                print(line, file=sys.stderr)
+            sys.exit(1)
+        print(f"{GREEN}Holdings match.{RESET}")
 
 
 if __name__ == "__main__":
