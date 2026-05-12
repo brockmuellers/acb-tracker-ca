@@ -185,13 +185,14 @@ def compute_acb(rows):
         elif tx_type == "SELL":
             if qty > shares:
                 raise ValueError(
-                    f"SELL of {ticker} on {tx['date']} exceeds holdings: {qty} > {shares}"
+                    f"{tx_type} of {ticker} on {tx['date']} exceeds holdings: {qty} > {shares}"
                 )
             # CRA average-cost rule: per-share ACB unchanged by a sell.
             acb_per_share = total_acb / shares
             acb_of_sold = qty * acb_per_share
             total_acb -= acb_of_sold
             shares -= qty
+
             raw_gain_loss = amount_cad - acb_of_sold
 
             s_qty = tx["superficial_qty"]
@@ -220,7 +221,12 @@ def compute_acb(rows):
                         f"within 30 days before or after this sale, set superficial_qty to the "
                         f"number of shares repurchased. Set to 0 to confirm no superficial loss.{RESET}",
                         file=sys.stderr, flush=True,
-                    )
+                        )
+        elif tx_type == "CASH-IN":
+            shares += qty
+        elif tx_type == "CASH-OUT":
+            # Due to potential settlement delays, cash holdings may sometimes become negative, so don't verify holdings.
+            shares -= qty
         else:
             raise ValueError(f"Unknown transaction type: {tx_type!r}")
 
@@ -274,9 +280,9 @@ def compute_holdings(output_rows):
         if key not in per_account_qty:
             per_account_qty[key] = Decimal(0)
 
-        if tx_type in ("BUY", "START"):
+        if tx_type in ("BUY", "START", "CASH-IN"):
             per_account_qty[key] += qty
-        elif tx_type == "SELL":
+        elif tx_type in ("SELL", "CASH-OUT"):
             per_account_qty[key] -= qty
         elif tx_type == "TRANSFER":
             per_account_qty[key] += qty  # qty is signed: positive = in, negative = out

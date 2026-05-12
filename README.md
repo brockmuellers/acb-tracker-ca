@@ -109,7 +109,7 @@ Notes:
 - Multiple files for the same currency (e.g. different years) are merged automatically
 - Every CSV in the directory is expected to be a Bank of Canada FX file
 
-### Sweep transaction types (`sweep_types`)
+### Settlement fund transaction types (`settlement_fund_types`)
 
 ACB must be tracked for USD settlement funds, due to fluctuating exchange rates.
 
@@ -117,11 +117,11 @@ Some brokers (e.g. Vanguard) store quantity and price in non-standard columns fo
 transaction types in settlement funds. For example, Vanguard's "Sweep in" and "Sweep out" rows always show
 `Shares=0` — the actual dollar amount is in `Net Amount`.
 
-Use `sweep_types` in the mapping config to redirect quantity and/or price for a set of
+Use `settlement_fund_types` in the mapping config to redirect quantity and/or price for a set of
 broker transaction type values:
 
 ```yaml
-sweep_types:
+settlement_fund_types:
   types:
     - Sweep in
     - Sweep out
@@ -132,6 +132,47 @@ sweep_types:
 - `types` — list of raw broker transaction type values that need alternate column handling
 - `quantity_col` — broker column name to use as quantity instead of the mapped column (sign is stripped; absolute value is used)
 - `price_override` — literal price to use (omit if the mapped price column is already correct)
+
+### Cash transaction types (`cash_type_map`)
+
+Some broker transaction types represent actual cash flows — dividends paid in cash, interest, fees, withdrawals. Use `cash_type_map` to route those rows to `CASH-IN` or `CASH-OUT`.
+
+Cash rows always use `ticker = defaults.cash_ticker`, `price = 1.0`, and `quantity = abs(amount_col)`.
+
+```yaml
+defaults:
+  currency: USD
+  cash_ticker: CASH-USD     # ticker assigned to every cash row
+
+cash_type_map:
+  quantity_col: Amount      # broker column holding the dollar amount (sign is stripped)
+  types:
+    Cash Dividend: CASH-IN  # cash-only: not in type_map → one cash row
+    Advisor Fee: CASH-OUT   # cash-only: not in type_map → one cash row
+    Sell: CASH-IN           # dual: also in type_map → security row + cash row
+  ticker_fallback_types:
+    Security Transfer: CASH-IN  # see below
+```
+
+#### `types` — always-cash routing
+
+Every type listed under `types` always produces a `CASH-IN` or `CASH-OUT` row.
+
+- If the type **also appears in `type_map`** (e.g. `Sell`), one input row produces **two output rows**: a security row (`SELL`) followed by a cash row (`CASH-IN`). This models the double-entry reality of a sale: VTI decreases and cash increases simultaneously.
+- If the type **only appears here** (e.g. `Cash Dividend`), only a cash row is produced. The broker row's own ticker is discarded and replaced with `cash_ticker`.
+
+#### `ticker_fallback_types` — ticker-conditional routing
+
+Some broker transaction types can represent either a security movement or a cash movement depending on context. For example, Schwab's "Security Transfer" rows carry a ticker when securities arrive, but have no ticker when the transfer is actually cash.
+
+Types listed under `ticker_fallback_types` are routed based on whether the broker row has a non-empty ticker:
+
+- **Non-empty ticker** → treated as a normal security row via `type_map` (no cash row produced).
+- **Empty ticker** → treated as cash only (one `CASH-IN`/`CASH-OUT` row produced, same as `types`).
+
+This is why `ticker_fallback_types` is a separate sub-key rather than a flag on individual entries in `types`: the two sub-keys have meaningfully different semantics, and keeping them visually distinct prevents accidental misconfiguration.
+
+A type may not appear in both `types` and `ticker_fallback_types`.
 
 ### Dates
 

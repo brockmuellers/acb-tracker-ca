@@ -540,3 +540,57 @@ def test_holdings_multi_ticker_multi_account():
     total_xeqt = next(r for r in holdings if r["account_number"] == "TOTAL" and r["ticker"] == "XEQT")
     assert total_vfv["quantity"] == Decimal("150")
     assert total_xeqt["quantity"] == Decimal("200")
+
+
+# --- CASH-IN / CASH-OUT ---
+
+def test_cash_in_increases_holdings():
+    rows = [tx("2024-01-01", "CASH-USD", "CASH-IN", 1000, "1.0", currency="USD", exchange_rate="1.35")]
+    out = list(compute_acb(rows))
+    assert out[0]["acb_cad"] == Decimal("1350.00")
+
+
+def test_cash_out_decreases_holdings():
+    rows = [
+        tx("2024-01-01", "CASH-USD", "CASH-IN", 1000, "1.0", currency="USD", exchange_rate="1.35"),
+        tx("2024-06-01", "CASH-USD", "CASH-OUT", 500, "1.0", currency="USD", exchange_rate="1.38"),
+    ]
+    out = list(compute_acb(rows))
+    assert out[1]["acb_cad"] == Decimal("675.00")
+
+
+def test_cash_out_has_no_gain_loss():
+    rows = [
+        tx("2024-01-01", "CASH-USD", "CASH-IN", 1000, "1.0", currency="USD", exchange_rate="1.35"),
+        tx("2024-06-01", "CASH-USD", "CASH-OUT", 500, "1.0", currency="USD", exchange_rate="1.38"),
+    ]
+    out = list(compute_acb(rows))
+    assert out[1]["gain_loss_cad"] == ""
+    assert out[1]["superficial_loss_cad"] == ""
+
+
+def test_cash_out_no_superficial_loss_warning(capsys):
+    rows = [
+        tx("2024-01-01", "CASH-USD", "CASH-IN", 1000, "1.0"),
+        tx("2024-06-01", "CASH-USD", "CASH-OUT", 500, "1.0"),
+    ]
+    list(compute_acb(rows))
+    assert "superficial" not in capsys.readouterr().err
+
+
+def test_cash_in_cad_no_exchange_rate_needed():
+    rows = [tx("2024-01-01", "CASH-CAD", "CASH-IN", 500, "1.0")]
+    out = list(compute_acb(rows))
+    assert out[0]["acb_cad"] == Decimal("500.00")
+
+
+def test_cash_ticker_appears_in_holdings():
+    rows = [
+        tx("2024-01-01", "CASH-USD", "CASH-IN", 1000, "1.0", currency="USD", exchange_rate="1.35"),
+        tx("2024-01-02", "CASH-USD", "CASH-OUT", 200, "1.0", currency="USD", exchange_rate="1.35"),
+    ]
+    output_rows = list(compute_acb(rows))
+    holdings = compute_holdings(output_rows)
+    cash_holding = next((r for r in holdings if r["ticker"] == "CASH-USD" and r["account_number"] == "TOTAL"), None)
+    assert cash_holding is not None
+    assert cash_holding["quantity"] == Decimal("800")

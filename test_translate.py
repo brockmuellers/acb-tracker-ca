@@ -564,7 +564,7 @@ def test_zero_validation_fires_after_sweep_override():
     """A sweep row with price_override must not raise even if mapped price column is 0."""
     config = AppConfig.from_dict({
         **BASE_CONFIG,
-        "sweep_types": {
+        "settlement_fund_types": {
             "types": ["Sweep in"],
             "quantity_col": "Net Amount",
             "price_override": "1.0",
@@ -631,11 +631,11 @@ def test_cli_fx_dir_populates_exchange_rate(tmp_path):
     )
 
 
-# --- sweep_types ---
+# --- settlement_fund_types ---
 
 SWEEP_CONFIG = AppConfig.from_dict({
     **BASE_CONFIG,
-    "sweep_types": {
+    "settlement_fund_types": {
         "types": ["Sweep in", "Sweep out"],
         "quantity_col": "Net Amount",
         "price_override": "1.0",
@@ -655,34 +655,34 @@ def make_sweep_row(**kwargs):
     }
 
 
-def test_sweep_type_quantity_taken_from_alternate_col():
+def test_settlement_fund_type_quantity_taken_from_alternate_col():
     out = list(translate_rows([make_sweep_row()], SWEEP_CONFIG))
     assert out[0]["quantity"] == "53.03"
 
 
-def test_sweep_type_price_override_applied():
+def test_settlement_fund_type_price_override_applied():
     out = list(translate_rows([make_sweep_row()], SWEEP_CONFIG))
     assert out[0]["price"] == "1.0"
 
 
-def test_sweep_type_price_zero_overridden():
+def test_settlement_fund_type_price_zero_overridden():
     """Rows with Price=0 get corrected by price_override."""
     out = list(translate_rows([make_sweep_row(**{"Price ($)": "0", "Net Amount": "-0.01"})], SWEEP_CONFIG))
     assert out[0]["price"] == "1.0"
     assert out[0]["quantity"] == "0.01"
 
 
-def test_sweep_type_negative_net_amount_sign_stripped():
+def test_settlement_fund_type_negative_net_amount_sign_stripped():
     out = list(translate_rows([make_sweep_row(**{"Net Amount": "-198.38"})], SWEEP_CONFIG))
     assert out[0]["quantity"] == "198.38"
 
 
-def test_sweep_type_positive_net_amount_unchanged():
+def test_settlement_fund_type_positive_net_amount_unchanged():
     out = list(translate_rows([make_sweep_row(**{"Txn Type": "Sweep out", "Net Amount": "53.32"})], SWEEP_CONFIG))
     assert out[0]["quantity"] == "53.32"
 
 
-def test_sweep_type_non_sweep_transaction_unaffected():
+def test_settlement_fund_type_non_sweep_transaction_unaffected():
     """A regular BUY row must not get the sweep override."""
     row = make_row(**{"Shares": "10", "Price ($)": "290.79"})
     row["Net Amount"] = "-290.79"
@@ -691,10 +691,10 @@ def test_sweep_type_non_sweep_transaction_unaffected():
     assert out[0]["price"] == "290.79"
 
 
-def test_sweep_type_missing_quantity_col_raises():
+def test_settlement_fund_type_missing_quantity_col_raises():
     config = AppConfig.from_dict({
         **BASE_CONFIG,
-        "sweep_types": {"types": ["Sweep in"], "quantity_col": "Nonexistent Column"},
+        "settlement_fund_types": {"types": ["Sweep in"], "quantity_col": "Nonexistent Column"},
     })
     with pytest.raises(ValueError, match="quantity_col"):
         list(translate_rows([make_sweep_row()], config))
@@ -722,7 +722,7 @@ def test_validate_column_map_error_lists_available_columns():
 
 
 def test_validate_column_map_raises_for_missing_sweep_quantity_col():
-    with pytest.raises(ValueError, match="Missing Col.*sweep_types"):
+    with pytest.raises(ValueError, match="Missing Col.*settlement_fund_types"):
         validate_column_map(
             BASE_CONFIG["column_map"],
             CSV_HEADERS,
@@ -884,7 +884,7 @@ FULL_CONFIG = {
     "skip_types": ["Dividend"],
     "date_format": "%m/%d/%Y",
     "defaults": {"currency": "CAD"},
-    "sweep_types": {"types": ["Sweep in"], "quantity_col": "Net Amount", "price_override": "1.0"},
+    "settlement_fund_types": {"types": ["Sweep in"], "quantity_col": "Net Amount", "price_override": "1.0"},
 }
 
 
@@ -949,30 +949,335 @@ def test_from_dict_wrong_type_defaults_raises():
         AppConfig.from_dict(bad, "test.json")
 
 
-def test_from_dict_sweep_types_missing_types_raises():
-    bad = {**MINIMAL_CONFIG, "sweep_types": {"quantity_col": "Net Amount"}}
-    with pytest.raises(ValueError, match="sweep_types.'types'"):
+def test_from_dict_settlement_fund_types_missing_types_raises():
+    bad = {**MINIMAL_CONFIG, "settlement_fund_types": {"quantity_col": "Net Amount"}}
+    with pytest.raises(ValueError, match="settlement_fund_types.'types'"):
         AppConfig.from_dict(bad, "test.json")
 
 
-def test_from_dict_sweep_types_empty_types_raises():
-    bad = {**MINIMAL_CONFIG, "sweep_types": {"types": []}}
-    with pytest.raises(ValueError, match="sweep_types.'types'"):
+def test_from_dict_settlement_fund_types_empty_types_raises():
+    bad = {**MINIMAL_CONFIG, "settlement_fund_types": {"types": []}}
+    with pytest.raises(ValueError, match="settlement_fund_types.'types'"):
         AppConfig.from_dict(bad, "test.json")
 
 
-def test_from_dict_sweep_types_unknown_key_raises():
-    bad = {**MINIMAL_CONFIG, "sweep_types": {"types": ["Sweep in"], "qty_col": "Net Amount"}}  # typo
-    with pytest.raises(ValueError, match="sweep_types has unknown key"):
+def test_from_dict_settlement_fund_types_unknown_key_raises():
+    bad = {**MINIMAL_CONFIG, "settlement_fund_types": {"types": ["Sweep in"], "qty_col": "Net Amount"}}  # typo
+    with pytest.raises(ValueError, match="settlement_fund_types has unknown key"):
         AppConfig.from_dict(bad, "test.json")
 
 
-def test_from_dict_sweep_types_unknown_key_lists_valid_keys():
-    bad = {**MINIMAL_CONFIG, "sweep_types": {"types": ["Sweep in"], "qty_col": "Net Amount"}}
-    with pytest.raises(ValueError, match="Valid sweep_types keys"):
+def test_from_dict_settlement_fund_types_unknown_key_lists_valid_keys():
+    bad = {**MINIMAL_CONFIG, "settlement_fund_types": {"types": ["Sweep in"], "qty_col": "Net Amount"}}
+    with pytest.raises(ValueError, match="Valid settlement_fund_types keys"):
         AppConfig.from_dict(bad, "test.json")
 
 
 def test_from_dict_error_includes_config_path():
     with pytest.raises(ValueError, match="mybroker.json"):
         AppConfig.from_dict({}, "mybroker.json")
+
+
+# --- cash_type_map ---
+
+CASH_CONFIG = {
+    **BASE_CONFIG,
+    "type_map": {"Buy": "BUY", "Sell": "SELL"},
+    "defaults": {"currency": "USD", "cash_ticker": "CASH-USD"},
+    "cash_type_map": {
+        "quantity_col": "Amount",
+        "types": {
+            "Cash Dividend": "CASH-IN",   # cash-only: not in type_map
+            "Advisor Fee": "CASH-OUT",    # cash-only: not in type_map
+            "Sell": "CASH-IN",            # dual: also in type_map
+        },
+    },
+}
+
+
+def make_cash_row(**kwargs):
+    return {
+        "Trade Date": "2024-06-15",
+        "Symbol": "VTI",
+        "Txn Type": "Sell",
+        "Shares": "10",
+        "Price ($)": "250.00",
+        "Amount": "2500.00",
+        **kwargs,
+    }
+
+
+def test_cash_only_type_emits_one_cash_row():
+    """A type only in cash_type_map (not type_map) produces only a CASH-IN/OUT row."""
+    cfg = AppConfig.from_dict(CASH_CONFIG)
+    row = {**make_cash_row(), "Txn Type": "Advisor Fee", "Amount": "50.00"}
+    out = list(translate_rows([row], cfg))
+    assert len(out) == 1
+    assert out[0]["type"] == "CASH-OUT"
+    assert out[0]["ticker"] == "CASH-USD"
+    assert out[0]["quantity"] == "50.00"
+    assert out[0]["price"] == "1.0"
+
+
+def test_dual_type_emits_security_row_then_cash_row():
+    """A type in both maps produces a security row followed by a cash row."""
+    cfg = AppConfig.from_dict(CASH_CONFIG)
+    out = list(translate_rows([make_cash_row()], cfg))
+    assert len(out) == 2
+    sec, cash = out
+    assert sec["type"] == "SELL"
+    assert sec["ticker"] == "VTI"
+    assert sec["quantity"] == "10"
+    assert cash["type"] == "CASH-IN"
+    assert cash["ticker"] == "CASH-USD"
+    assert cash["quantity"] == "2500.00"
+    assert cash["price"] == "1.0"
+
+
+def test_cash_row_strips_sign_from_amount():
+    """Negative Amount values are treated as positive quantity on the cash row."""
+    cfg = AppConfig.from_dict(CASH_CONFIG)
+    row = {**make_cash_row(), "Amount": "-2500.00"}
+    out = list(translate_rows([row], cfg))
+    cash = out[1]
+    assert cash["quantity"] == "2500.00"
+
+
+def test_cash_only_type_with_non_empty_ticker_discards_ticker():
+    """cash_type_map always overwrites ticker with cash_ticker, ignoring source ticker."""
+    cfg = AppConfig.from_dict(CASH_CONFIG)
+    row = {**make_cash_row(), "Txn Type": "Cash Dividend", "Amount": "12.34"}
+    out = list(translate_rows([row], cfg))
+    assert len(out) == 1
+    assert out[0]["ticker"] == "CASH-USD"
+
+
+def test_cash_type_map_date_is_converted():
+    """Cash row uses the ISO-converted date, not the raw broker date."""
+    cfg = AppConfig.from_dict({**CASH_CONFIG, "date_format": "%m/%d/%Y"})
+    row = {**make_cash_row(), "Trade Date": "06/15/2024", "Txn Type": "Advisor Fee", "Amount": "5.00"}
+    out = list(translate_rows([row], cfg))
+    assert out[0]["date"] == "2024-06-15"
+
+
+def test_cash_type_map_inherits_currency_default():
+    """Cash row gets currency from defaults when not present in column_map."""
+    cfg = AppConfig.from_dict(CASH_CONFIG)
+    row = {**make_cash_row(), "Txn Type": "Advisor Fee", "Amount": "5.00"}
+    out = list(translate_rows([row], cfg))
+    assert out[0].get("currency") == "USD"
+
+
+def test_dual_type_empty_ticker_skips_security_row():
+    """When the source row has an empty ticker, security row is skipped; cash row still emits."""
+    cfg = AppConfig.from_dict(CASH_CONFIG)
+    row = {**make_cash_row(), "Symbol": "", "Amount": "100.00"}
+    out = list(translate_rows([row], cfg))
+    assert len(out) == 1
+    assert out[0]["type"] == "CASH-IN"
+    assert out[0]["ticker"] == "CASH-USD"
+
+
+def test_cash_only_unknown_type_raises():
+    """A type not in type_map and not in cash_type_map raises TranslationError."""
+    cfg = AppConfig.from_dict(CASH_CONFIG)
+    row = {**make_cash_row(), "Txn Type": "Wire Transfer"}
+    with pytest.raises(ValueError, match="unknown type value 'Wire Transfer'"):
+        list(translate_rows([row], cfg))
+
+
+def test_cash_type_map_missing_quantity_col_in_row_raises():
+    cfg = AppConfig.from_dict(CASH_CONFIG)
+    row = make_cash_row()
+    del row["Amount"]
+    row["Txn Type"] = "Advisor Fee"
+    with pytest.raises(ValueError, match="quantity_col 'Amount' not found in row"):
+        list(translate_rows([row], cfg))
+
+
+def test_cash_type_map_empty_amount_raises():
+    cfg = AppConfig.from_dict(CASH_CONFIG)
+    row = {**make_cash_row(), "Txn Type": "Advisor Fee", "Amount": ""}
+    with pytest.raises(ValueError, match="is empty"):
+        list(translate_rows([row], cfg))
+
+
+def test_cash_type_map_zero_amount_raises():
+    cfg = AppConfig.from_dict(CASH_CONFIG)
+    row = {**make_cash_row(), "Txn Type": "Advisor Fee", "Amount": "0.00"}
+    with pytest.raises(ValueError, match="cash quantity is 0"):
+        list(translate_rows([row], cfg))
+
+
+def test_cash_type_map_requires_cash_ticker():
+    bad = {
+        **BASE_CONFIG,
+        "type_map": {"Advisor Fee": "BUY"},
+        "cash_type_map": {"quantity_col": "Amount", "types": {"Advisor Fee": "CASH-OUT"}},
+    }
+    with pytest.raises(ValueError, match="cash_ticker"):
+        AppConfig.from_dict(bad, "test.json")
+
+
+def test_cash_type_map_unknown_key_raises():
+    bad = {
+        **BASE_CONFIG,
+        "defaults": {"cash_ticker": "CASH-USD"},
+        "cash_type_map": {"quantity_col": "Amount", "types": {"Fee": "CASH-OUT"}, "extra": "x"},
+    }
+    with pytest.raises(ValueError, match="cash_type_map has unknown key"):
+        AppConfig.from_dict(bad, "test.json")
+
+
+def test_cash_type_map_invalid_acb_type_raises():
+    bad = {
+        **BASE_CONFIG,
+        "defaults": {"cash_ticker": "CASH-USD"},
+        "cash_type_map": {"quantity_col": "Amount", "types": {"Fee": "BUY"}},
+    }
+    with pytest.raises(ValueError, match="CASH-IN.*CASH-OUT|CASH-OUT.*CASH-IN"):
+        AppConfig.from_dict(bad, "test.json")
+
+
+def test_cash_type_map_empty_types_raises():
+    bad = {
+        **BASE_CONFIG,
+        "defaults": {"cash_ticker": "CASH-USD"},
+        "cash_type_map": {"quantity_col": "Amount", "types": {}},
+    }
+    with pytest.raises(ValueError, match="cash_type_map.'types' must be a non-empty dict"):
+        AppConfig.from_dict(bad, "test.json")
+
+
+def test_cash_ticker_not_applied_as_generic_default():
+    """cash_ticker in defaults must not be copied onto translated rows as a 'ticker' value."""
+    cfg = AppConfig.from_dict(CASH_CONFIG)
+    row = make_cash_row()  # has a real ticker "VTI", type "Sell" → dual emission
+    out = list(translate_rows([row], cfg))
+    sec = out[0]
+    assert sec["ticker"] == "VTI"  # security row keeps its own ticker
+
+
+def test_settlement_fund_and_cash_type_map_overlap_emits_dual_rows():
+    """A type in both settlement_fund_types and cash_type_map emits a security row and a cash row.
+
+    E.g. cash swept into a settlement fund: CASH-OUT (cash decreases) + BUY (fund increases).
+    """
+    config = AppConfig.from_dict({
+        **BASE_CONFIG,
+        "type_map": {"Buy": "BUY", "Sell": "SELL", "Sweep in": "BUY"},
+        "defaults": {"cash_ticker": "CASH-USD"},
+        "settlement_fund_types": {"types": ["Sweep in"], "quantity_col": "Net Amount", "price_override": "1.0"},
+        "cash_type_map": {"quantity_col": "Amount", "types": {"Sweep in": "CASH-OUT"}},
+    })
+    row = {
+        "Trade Date": "2025-06-01",
+        "Symbol": "VMFXX",
+        "Txn Type": "Sweep in",
+        "Shares": "0",
+        "Price ($)": "0",
+        "Net Amount": "53.03",
+        "Amount": "53.03",
+    }
+    out = list(translate_rows([row], config))
+    assert len(out) == 2
+    sec, cash = out
+    assert sec["ticker"] == "VMFXX"
+    assert sec["type"] == "BUY"
+    assert sec["quantity"] == "53.03"
+    assert sec["price"] == "1.0"
+    assert cash["ticker"] == "CASH-USD"
+    assert cash["type"] == "CASH-OUT"
+    assert cash["quantity"] == "53.03"
+
+
+def test_cash_type_map_types_and_ticker_fallback_overlap_raises():
+    bad = {
+        **BASE_CONFIG,
+        "defaults": {"cash_ticker": "CASH-USD"},
+        "type_map": {"Security Transfer": "TRANSFER"},
+        "cash_type_map": {
+            "quantity_col": "Amount",
+            "types": {"Security Transfer": "CASH-IN"},
+            "ticker_fallback_types": {"Security Transfer": "CASH-IN"},
+        },
+    }
+    with pytest.raises(ValueError, match="both.*types.*ticker_fallback_types|ticker_fallback_types.*types"):
+        AppConfig.from_dict(bad, "test.json")
+
+
+def test_cash_type_map_empty_both_dicts_raises():
+    bad = {
+        **BASE_CONFIG,
+        "defaults": {"cash_ticker": "CASH-USD"},
+        "cash_type_map": {"quantity_col": "Amount"},
+    }
+    with pytest.raises(ValueError, match="at least one of"):
+        AppConfig.from_dict(bad, "test.json")
+
+
+# --- ticker_fallback_types ---
+
+FALLBACK_CONFIG = {
+    **BASE_CONFIG,
+    "type_map": {"Buy": "BUY", "Sell": "SELL", "Security Transfer": "TRANSFER"},
+    "defaults": {"currency": "USD", "cash_ticker": "CASH-USD"},
+    "cash_type_map": {
+        "quantity_col": "Amount",
+        "types": {
+            "Cash Dividend": "CASH-IN",
+            "Sell": "CASH-IN",
+        },
+        "ticker_fallback_types": {
+            "Security Transfer": "CASH-IN",
+        },
+    },
+}
+
+
+def test_ticker_fallback_with_ticker_emits_security_row_only():
+    """Security Transfer + VTI → only one TRANSFER row; no cash row."""
+    cfg = AppConfig.from_dict(FALLBACK_CONFIG)
+    row = {**make_cash_row(), "Txn Type": "Security Transfer", "Symbol": "VTI",
+           "Shares": "50", "Price ($)": "200.00", "Amount": "10000.00"}
+    out = list(translate_rows([row], cfg))
+    assert len(out) == 1
+    assert out[0]["type"] == "TRANSFER"
+    assert out[0]["ticker"] == "VTI"
+
+
+def test_ticker_fallback_without_ticker_emits_cash_row_only():
+    """Security Transfer + empty ticker → only one CASH-IN row."""
+    cfg = AppConfig.from_dict(FALLBACK_CONFIG)
+    row = {**make_cash_row(), "Txn Type": "Security Transfer", "Symbol": "",
+           "Amount": "5000.00"}
+    out = list(translate_rows([row], cfg))
+    assert len(out) == 1
+    assert out[0]["type"] == "CASH-IN"
+    assert out[0]["ticker"] == "CASH-USD"
+    assert out[0]["quantity"] == "5000.00"
+
+
+def test_ticker_fallback_cash_row_uses_amount_col():
+    """The cash row quantity comes from quantity_col, not the security quantity column."""
+    cfg = AppConfig.from_dict(FALLBACK_CONFIG)
+    row = {**make_cash_row(), "Txn Type": "Security Transfer", "Symbol": "",
+           "Shares": "0", "Amount": "1234.56"}
+    out = list(translate_rows([row], cfg))
+    assert out[0]["quantity"] == "1234.56"
+
+
+def test_validate_column_map_checks_cash_quantity_col(tmp_path):
+    cfg_path = tmp_path / "m.yaml"
+    cfg_path.write_text(yaml.dump(CASH_CONFIG))
+    # CSV missing the Amount column
+    rows = [{"Trade Date": "2024-01-01", "Symbol": "VTI", "Txn Type": "Sell",
+             "Shares": "10", "Price ($)": "250"}]
+    with pytest.raises(ValueError, match="Amount.*cash_type_map"):
+        validate_column_map(
+            {"Trade Date": "date", "Symbol": "ticker", "Txn Type": "type",
+             "Shares": "quantity", "Price ($)": "price"},
+            rows[0].keys(),
+            str(cfg_path),
+            cash_quantity_col="Amount",
+        )

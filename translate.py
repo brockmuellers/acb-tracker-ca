@@ -20,7 +20,7 @@ The mapping config is a YAML file with the following schema:
     optional_columns:         # optional — broker column names from column_map that may be absent from the CSV
       - Time                  #   no error is raised if these columns are not present in the input
 
-    type_map:                 # optional — remap broker type values to BUY/SELL/START
+    type_map:                 # optional — remap broker type values to BUY/SELL/START/TRANSFER
       Buy: BUY
       Sell: SELL
 
@@ -32,13 +32,25 @@ The mapping config is a YAML file with the following schema:
 
     defaults:                 # optional — static values for missing or empty columns
       currency: CAD
+      cash_ticker: CASH-USD   # required when cash_type_map is used; ticker assigned to all cash rows
 
-    sweep_types:              # optional — broker sweep fund types whose quantity/price live in alternate columns
+    settlement_fund_types:    # optional — broker settlement fund types whose quantity/price live in alternate columns
       types:
         - Sweep in
         - Sweep out
       quantity_col: Net Amount  # broker column to read quantity from (sign stripped)
       price_override: "1.0"    # literal price (omit to use mapped price column)
+
+    cash_type_map:            # optional — broker types that generate a CASH-IN or CASH-OUT row
+      quantity_col: Amount    #   broker column holding the cash amount (sign stripped)
+                              #   cash row always uses: ticker=cash_ticker, price=1.0, quantity=abs(amount)
+      types:                  #   ALWAYS-CASH: these types always emit a cash row
+        Cash Dividend: CASH-IN  #   type only here → cash row only
+        Advisor Fee: CASH-OUT
+        Sell: CASH-IN           #   type also in type_map → security row + cash row (dual emission)
+      ticker_fallback_types:  #   TICKER-CONDITIONAL: routing depends on whether the broker row has a ticker
+        Security Transfer: CASH-IN  #   non-empty ticker → security row only (via type_map)
+                                    #   empty ticker    → cash row only (the security is actually cash)
 
 Only columns listed in column_map are kept; all other broker columns are dropped.
 Required acb.py input columns: date, ticker, type, quantity, price.
