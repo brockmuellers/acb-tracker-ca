@@ -27,7 +27,10 @@ def _diff_field(col, exp_val, act_val):
     if exp_val == act_val:
         return None
     try:
-        delta = Decimal(act_val) - Decimal(exp_val)
+        exp_d, act_d = Decimal(exp_val), Decimal(act_val)
+        if exp_d == act_d:
+            return None
+        delta = act_d - exp_d
         sign = "+" if delta > 0 else ""
         return f"{col}: {exp_val} → {act_val} ({sign}{delta})"
     except InvalidOperation:
