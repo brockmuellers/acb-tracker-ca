@@ -27,7 +27,7 @@ date_format: "%m/%d/%Y"
 defaults:
   currency: USD
 
-sweep_types:
+settlement_fund_types:
   types:
     - Reinvest Dividend
     - Short Term Cap Gain Reinvest

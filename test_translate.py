@@ -564,7 +564,7 @@ def test_zero_validation_fires_after_sweep_override():
     """A sweep row with price_override must not raise even if mapped price column is 0."""
     config = AppConfig.from_dict({
         **BASE_CONFIG,
-        "sweep_types": {
+        "settlement_fund_types": {
             "types": ["Sweep in"],
             "quantity_col": "Net Amount",
             "price_override": "1.0",
@@ -631,11 +631,11 @@ def test_cli_fx_dir_populates_exchange_rate(tmp_path):
     )
 
 
-# --- sweep_types ---
+# --- settlement_fund_types ---
 
 SWEEP_CONFIG = AppConfig.from_dict({
     **BASE_CONFIG,
-    "sweep_types": {
+    "settlement_fund_types": {
         "types": ["Sweep in", "Sweep out"],
         "quantity_col": "Net Amount",
         "price_override": "1.0",
@@ -655,34 +655,34 @@ def make_sweep_row(**kwargs):
     }
 
 
-def test_sweep_type_quantity_taken_from_alternate_col():
+def test_settlement_fund_type_quantity_taken_from_alternate_col():
     out = list(translate_rows([make_sweep_row()], SWEEP_CONFIG))
     assert out[0]["quantity"] == "53.03"
 
 
-def test_sweep_type_price_override_applied():
+def test_settlement_fund_type_price_override_applied():
     out = list(translate_rows([make_sweep_row()], SWEEP_CONFIG))
     assert out[0]["price"] == "1.0"
 
 
-def test_sweep_type_price_zero_overridden():
+def test_settlement_fund_type_price_zero_overridden():
     """Rows with Price=0 get corrected by price_override."""
     out = list(translate_rows([make_sweep_row(**{"Price ($)": "0", "Net Amount": "-0.01"})], SWEEP_CONFIG))
     assert out[0]["price"] == "1.0"
     assert out[0]["quantity"] == "0.01"
 
 
-def test_sweep_type_negative_net_amount_sign_stripped():
+def test_settlement_fund_type_negative_net_amount_sign_stripped():
     out = list(translate_rows([make_sweep_row(**{"Net Amount": "-198.38"})], SWEEP_CONFIG))
     assert out[0]["quantity"] == "198.38"
 
 
-def test_sweep_type_positive_net_amount_unchanged():
+def test_settlement_fund_type_positive_net_amount_unchanged():
     out = list(translate_rows([make_sweep_row(**{"Txn Type": "Sweep out", "Net Amount": "53.32"})], SWEEP_CONFIG))
     assert out[0]["quantity"] == "53.32"
 
 
-def test_sweep_type_non_sweep_transaction_unaffected():
+def test_settlement_fund_type_non_sweep_transaction_unaffected():
     """A regular BUY row must not get the sweep override."""
     row = make_row(**{"Shares": "10", "Price ($)": "290.79"})
     row["Net Amount"] = "-290.79"
@@ -691,10 +691,10 @@ def test_sweep_type_non_sweep_transaction_unaffected():
     assert out[0]["price"] == "290.79"
 
 
-def test_sweep_type_missing_quantity_col_raises():
+def test_settlement_fund_type_missing_quantity_col_raises():
     config = AppConfig.from_dict({
         **BASE_CONFIG,
-        "sweep_types": {"types": ["Sweep in"], "quantity_col": "Nonexistent Column"},
+        "settlement_fund_types": {"types": ["Sweep in"], "quantity_col": "Nonexistent Column"},
     })
     with pytest.raises(ValueError, match="quantity_col"):
         list(translate_rows([make_sweep_row()], config))
@@ -722,7 +722,7 @@ def test_validate_column_map_error_lists_available_columns():
 
 
 def test_validate_column_map_raises_for_missing_sweep_quantity_col():
-    with pytest.raises(ValueError, match="Missing Col.*sweep_types"):
+    with pytest.raises(ValueError, match="Missing Col.*settlement_fund_types"):
         validate_column_map(
             BASE_CONFIG["column_map"],
             CSV_HEADERS,
@@ -884,7 +884,7 @@ FULL_CONFIG = {
     "skip_types": ["Dividend"],
     "date_format": "%m/%d/%Y",
     "defaults": {"currency": "CAD"},
-    "sweep_types": {"types": ["Sweep in"], "quantity_col": "Net Amount", "price_override": "1.0"},
+    "settlement_fund_types": {"types": ["Sweep in"], "quantity_col": "Net Amount", "price_override": "1.0"},
 }
 
 
@@ -949,27 +949,27 @@ def test_from_dict_wrong_type_defaults_raises():
         AppConfig.from_dict(bad, "test.json")
 
 
-def test_from_dict_sweep_types_missing_types_raises():
-    bad = {**MINIMAL_CONFIG, "sweep_types": {"quantity_col": "Net Amount"}}
-    with pytest.raises(ValueError, match="sweep_types.'types'"):
+def test_from_dict_settlement_fund_types_missing_types_raises():
+    bad = {**MINIMAL_CONFIG, "settlement_fund_types": {"quantity_col": "Net Amount"}}
+    with pytest.raises(ValueError, match="settlement_fund_types.'types'"):
         AppConfig.from_dict(bad, "test.json")
 
 
-def test_from_dict_sweep_types_empty_types_raises():
-    bad = {**MINIMAL_CONFIG, "sweep_types": {"types": []}}
-    with pytest.raises(ValueError, match="sweep_types.'types'"):
+def test_from_dict_settlement_fund_types_empty_types_raises():
+    bad = {**MINIMAL_CONFIG, "settlement_fund_types": {"types": []}}
+    with pytest.raises(ValueError, match="settlement_fund_types.'types'"):
         AppConfig.from_dict(bad, "test.json")
 
 
-def test_from_dict_sweep_types_unknown_key_raises():
-    bad = {**MINIMAL_CONFIG, "sweep_types": {"types": ["Sweep in"], "qty_col": "Net Amount"}}  # typo
-    with pytest.raises(ValueError, match="sweep_types has unknown key"):
+def test_from_dict_settlement_fund_types_unknown_key_raises():
+    bad = {**MINIMAL_CONFIG, "settlement_fund_types": {"types": ["Sweep in"], "qty_col": "Net Amount"}}  # typo
+    with pytest.raises(ValueError, match="settlement_fund_types has unknown key"):
         AppConfig.from_dict(bad, "test.json")
 
 
-def test_from_dict_sweep_types_unknown_key_lists_valid_keys():
-    bad = {**MINIMAL_CONFIG, "sweep_types": {"types": ["Sweep in"], "qty_col": "Net Amount"}}
-    with pytest.raises(ValueError, match="Valid sweep_types keys"):
+def test_from_dict_settlement_fund_types_unknown_key_lists_valid_keys():
+    bad = {**MINIMAL_CONFIG, "settlement_fund_types": {"types": ["Sweep in"], "qty_col": "Net Amount"}}
+    with pytest.raises(ValueError, match="Valid settlement_fund_types keys"):
         AppConfig.from_dict(bad, "test.json")
 
 
@@ -1158,15 +1158,37 @@ def test_cash_ticker_not_applied_as_generic_default():
     assert sec["ticker"] == "VTI"  # security row keeps its own ticker
 
 
-def test_cash_type_map_sweep_overlap_raises():
-    bad = {
+def test_settlement_fund_and_cash_type_map_overlap_emits_dual_rows():
+    """A type in both settlement_fund_types and cash_type_map emits a security row and a cash row.
+
+    E.g. cash swept into a settlement fund: CASH-OUT (cash decreases) + BUY (fund increases).
+    """
+    config = AppConfig.from_dict({
         **BASE_CONFIG,
+        "type_map": {"Buy": "BUY", "Sell": "SELL", "Sweep in": "BUY"},
         "defaults": {"cash_ticker": "CASH-USD"},
-        "sweep_types": {"types": ["Sweep in"], "quantity_col": "Net Amount"},
-        "cash_type_map": {"quantity_col": "Amount", "types": {"Sweep in": "CASH-IN"}},
+        "settlement_fund_types": {"types": ["Sweep in"], "quantity_col": "Net Amount", "price_override": "1.0"},
+        "cash_type_map": {"quantity_col": "Amount", "types": {"Sweep in": "CASH-OUT"}},
+    })
+    row = {
+        "Trade Date": "2025-06-01",
+        "Symbol": "VMFXX",
+        "Txn Type": "Sweep in",
+        "Shares": "0",
+        "Price ($)": "0",
+        "Net Amount": "53.03",
+        "Amount": "53.03",
     }
-    with pytest.raises(ValueError, match="sweep_types and cash_type_map"):
-        AppConfig.from_dict(bad, "test.json")
+    out = list(translate_rows([row], config))
+    assert len(out) == 2
+    sec, cash = out
+    assert sec["ticker"] == "VMFXX"
+    assert sec["type"] == "BUY"
+    assert sec["quantity"] == "53.03"
+    assert sec["price"] == "1.0"
+    assert cash["ticker"] == "CASH-USD"
+    assert cash["type"] == "CASH-OUT"
+    assert cash["quantity"] == "53.03"
 
 
 def test_cash_type_map_types_and_ticker_fallback_overlap_raises():

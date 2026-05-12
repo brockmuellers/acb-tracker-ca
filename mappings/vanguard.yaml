@@ -21,7 +21,7 @@ skip_types:
 defaults:
   currency: USD
 
-sweep_types:
+settlement_fund_types:
   types:
     - Sweep in
     - Sweep out

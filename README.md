@@ -109,7 +109,7 @@ Notes:
 - Multiple files for the same currency (e.g. different years) are merged automatically
 - Every CSV in the directory is expected to be a Bank of Canada FX file
 
-### Sweep transaction types (`sweep_types`)
+### Settlement fund transaction types (`settlement_fund_types`)
 
 ACB must be tracked for USD settlement funds, due to fluctuating exchange rates.
 
@@ -117,11 +117,11 @@ Some brokers (e.g. Vanguard) store quantity and price in non-standard columns fo
 transaction types in settlement funds. For example, Vanguard's "Sweep in" and "Sweep out" rows always show
 `Shares=0` — the actual dollar amount is in `Net Amount`.
 
-Use `sweep_types` in the mapping config to redirect quantity and/or price for a set of
+Use `settlement_fund_types` in the mapping config to redirect quantity and/or price for a set of
 broker transaction type values:
 
 ```yaml
-sweep_types:
+settlement_fund_types:
   types:
     - Sweep in
     - Sweep out

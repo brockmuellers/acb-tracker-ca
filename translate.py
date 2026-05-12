@@ -34,7 +34,7 @@ The mapping config is a YAML file with the following schema:
       currency: CAD
       cash_ticker: CASH-USD   # required when cash_type_map is used; ticker assigned to all cash rows
 
-    sweep_types:              # optional — broker sweep fund types whose quantity/price live in alternate columns
+    settlement_fund_types:    # optional — broker settlement fund types whose quantity/price live in alternate columns
       types:
         - Sweep in
         - Sweep out

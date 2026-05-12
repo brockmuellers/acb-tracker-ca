@@ -16,7 +16,7 @@ ACB_INPUT_COLUMNS = ["account_number", "date", "ticker", "type", "quantity", "pr
 REQUIRED_COLUMNS = ["date", "ticker", "type", "quantity", "price"]
 FX_COL_RE = re.compile(r"^FX([A-Z]{3})CAD$")
 
-_VALID_CONFIG_KEYS = frozenset({"column_map", "optional_columns", "type_map", "skip_types", "date_format", "defaults", "sweep_types", "cash_type_map"})
+_VALID_CONFIG_KEYS = frozenset({"column_map", "optional_columns", "type_map", "skip_types", "date_format", "defaults", "settlement_fund_types", "cash_type_map"})
 _VALID_SWEEP_KEYS = frozenset({"types", "quantity_col", "price_override"})
 _VALID_CASH_TYPE_MAP_KEYS = frozenset({"types", "ticker_fallback_types", "quantity_col"})
 
@@ -44,12 +44,12 @@ class SweepConfig:
         unknown = sorted(set(data) - _VALID_SWEEP_KEYS)
         if unknown:
             raise ConfigurationError(
-                f"{config_path}: sweep_types has unknown key(s) {unknown}\n"
-                f"Valid sweep_types keys: {sorted(_VALID_SWEEP_KEYS)}"
+                f"{config_path}: settlement_fund_types has unknown key(s) {unknown}\n"
+                f"Valid settlement_fund_types keys: {sorted(_VALID_SWEEP_KEYS)}"
             )
         types = data.get("types")
         if not isinstance(types, list) or not types or not all(isinstance(x, str) for x in types):
-            raise ConfigurationError(f"{config_path}: sweep_types.'types' must be a non-empty list of strings")
+            raise ConfigurationError(f"{config_path}: settlement_fund_types.'types' must be a non-empty list of strings")
         for key in ("quantity_col", "price_override"):
             if key in data:
                 val = data[key]
@@ -57,7 +57,7 @@ class SweepConfig:
                     data[key] = str(val)
                 elif not isinstance(val, str):
                     raise ConfigurationError(
-                        f"{config_path}: sweep_types.'{key}' must be a string (got {type(val).__name__})"
+                        f"{config_path}: settlement_fund_types.'{key}' must be a string (got {type(val).__name__})"
                     )
         return cls(
             types=set(types),
@@ -201,10 +201,10 @@ class AppConfig:
             cash_ticker = d.get("cash_ticker") or None
 
         sweep = None
-        if "sweep_types" in data:
-            sw = data["sweep_types"]
+        if "settlement_fund_types" in data:
+            sw = data["settlement_fund_types"]
             if not isinstance(sw, dict):
-                raise ConfigurationError(f"{p}: 'sweep_types' must be a dict (got {type(sw).__name__})")
+                raise ConfigurationError(f"{p}: 'settlement_fund_types' must be a dict (got {type(sw).__name__})")
             sweep = SweepConfig.from_dict(sw, config_path)
 
         cash_type_map = None
@@ -217,13 +217,6 @@ class AppConfig:
                 raise ConfigurationError(
                     f"{p}: 'cash_type_map' requires 'defaults.cash_ticker' to be set"
                 )
-            if sweep:
-                overlap = sweep.types & set(cash_type_map.types)
-                if overlap:
-                    raise ConfigurationError(
-                        f"{p}: type(s) {sorted(overlap)} appear in both sweep_types and cash_type_map — "
-                        f"a type can only belong to one"
-                    )
 
         # cash_ticker is kept separate and not applied as a generic column default
         generic_defaults = {k: v for k, v in data.get("defaults", {}).items() if k != "cash_ticker"}
@@ -258,7 +251,7 @@ def validate_column_map(column_map, csv_headers, config_path="config", sweep_qua
     optional = optional_columns or set()
     missing = [k for k in column_map if k not in csv_col_set and k not in optional]
     if sweep_quantity_col and sweep_quantity_col not in csv_col_set:
-        missing.append(f"{sweep_quantity_col} (sweep_types)")
+        missing.append(f"{sweep_quantity_col} (settlement_fund_types)")
     if cash_quantity_col and cash_quantity_col not in csv_col_set:
         missing.append(f"{cash_quantity_col} (cash_type_map)")
     if missing:
@@ -379,7 +372,7 @@ def translate_rows(rows, config: AppConfig):
                         col = sweep.quantity_col
                         if col not in row:
                             raise TranslationError(
-                                f"row {row_num}: sweep_types quantity_col {col!r} not found in row"
+                                f"row {row_num}: settlement_fund_types quantity_col {col!r} not found in row"
                             )
                         sec["quantity"] = clean_number(row[col]).lstrip("-")
                     if sweep.price_override:
@@ -401,7 +394,7 @@ def translate_rows(rows, config: AppConfig):
                             raise TranslationError(f"{loc}: {col} {sec[col]!r} is not a valid number")
                         if val == 0 and not (col == "price" and is_transfer):
                             raise TranslationError(
-                                f"{loc}: {col} is 0 — check your column_map or sweep_types config"
+                                f"{loc}: {col} is 0 — check your column_map or settlement_fund_types config"
                             )
 
                 yield sec
