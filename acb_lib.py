@@ -151,7 +151,7 @@ def compute_acb(rows):
 
         gain_loss = ""
         superficial_loss = ""
-        if tx_type in ("START", "BUY", "CASH-IN"):
+        if tx_type in ("START", "BUY"):
             shares += qty
             total_acb += amount_cad
         elif tx_type == "TRANSFER":
@@ -182,7 +182,7 @@ def compute_acb(rows):
                 transfer_out_acb.setdefault((ticker, tx["date"], out_qty), []).append(acb_per_share)
                 total_acb -= out_qty * acb_per_share
                 shares -= out_qty
-        elif tx_type in ("SELL", "CASH-OUT"):
+        elif tx_type == "SELL":
             if qty > shares:
                 raise ValueError(
                     f"{tx_type} of {ticker} on {tx['date']} exceeds holdings: {qty} > {shares}"
@@ -193,36 +193,40 @@ def compute_acb(rows):
             total_acb -= acb_of_sold
             shares -= qty
 
-            if tx_type == "SELL":
-                raw_gain_loss = amount_cad - acb_of_sold
+            raw_gain_loss = amount_cad - acb_of_sold
 
-                s_qty = tx["superficial_qty"]
-                if s_qty is not None and s_qty > 0:
-                    if raw_gain_loss >= 0:
-                        raise ValueError(
-                            f"superficial_qty set for {ticker} on {tx['date']} but the sale is not a loss"
+            s_qty = tx["superficial_qty"]
+            if s_qty is not None and s_qty > 0:
+                if raw_gain_loss >= 0:
+                    raise ValueError(
+                        f"superficial_qty set for {ticker} on {tx['date']} but the sale is not a loss"
+                    )
+                if s_qty > qty:
+                    raise ValueError(
+                        f"superficial_qty {s_qty} exceeds quantity sold {qty} "
+                        f"for {ticker} on {tx['date']}"
+                    )
+                # Denied loss: the proportional loss on the superficial shares.
+                # Added back to total_acb so it defers into future per-share cost.
+                denied = s_qty * (acb_per_share - amount_cad / qty)
+                total_acb += denied
+                superficial_loss = denied.quantize(CENTS, rounding=ROUND_HALF_EVEN)
+                gain_loss = (raw_gain_loss + denied).quantize(CENTS, rounding=ROUND_HALF_EVEN)
+            else:
+                gain_loss = raw_gain_loss.quantize(CENTS, rounding=ROUND_HALF_EVEN)
+                if s_qty is None and gain_loss < 0:
+                    print(
+                        f"{YELLOW}Warning: SELL of {qty} shares of {ticker} on {tx['date']} realized a loss of "
+                        f"{gain_loss}. If you or an affiliated person bought the same security "
+                        f"within 30 days before or after this sale, set superficial_qty to the "
+                        f"number of shares repurchased. Set to 0 to confirm no superficial loss.{RESET}",
+                        file=sys.stderr, flush=True,
                         )
-                    if s_qty > qty:
-                        raise ValueError(
-                            f"superficial_qty {s_qty} exceeds quantity sold {qty} "
-                            f"for {ticker} on {tx['date']}"
-                        )
-                    # Denied loss: the proportional loss on the superficial shares.
-                    # Added back to total_acb so it defers into future per-share cost.
-                    denied = s_qty * (acb_per_share - amount_cad / qty)
-                    total_acb += denied
-                    superficial_loss = denied.quantize(CENTS, rounding=ROUND_HALF_EVEN)
-                    gain_loss = (raw_gain_loss + denied).quantize(CENTS, rounding=ROUND_HALF_EVEN)
-                else:
-                    gain_loss = raw_gain_loss.quantize(CENTS, rounding=ROUND_HALF_EVEN)
-                    if s_qty is None and gain_loss < 0:
-                        print(
-                            f"{YELLOW}Warning: SELL of {qty} shares of {ticker} on {tx['date']} realized a loss of "
-                            f"{gain_loss}. If you or an affiliated person bought the same security "
-                            f"within 30 days before or after this sale, set superficial_qty to the "
-                            f"number of shares repurchased. Set to 0 to confirm no superficial loss.{RESET}",
-                            file=sys.stderr, flush=True,
-                        )
+        elif tx_type == "CASH-IN":
+            shares += qty
+        elif tx_type == "CASH-OUT":
+            # Due to potential settlement delays, cash holdings may sometimes become negative, so don't verify holdings.
+            shares -= qty
         else:
             raise ValueError(f"Unknown transaction type: {tx_type!r}")
 
