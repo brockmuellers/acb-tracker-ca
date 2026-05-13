@@ -198,16 +198,15 @@ python3 -m pytest test_acb.py test_translate.py -v
 - No commissions / outlays.
 - Only START, `BUY`, SELL, and TRANSFER are supported
   - DRIP must be modeled as `BUY`/`SELL` pairs.
-  - No splits or phantom distributions.
+  - No splits or reverse splits.
+  - No phantom distributions (they are not relevant to US brokerages).
   - Return of Capital (RoC) is not supported. Note that US brokerages may not have unique transaction types representing RoC distributions; instead, distributions may not be classified as RoC until the end of the year. Any RoC amount will be reflected as a non-zero value on box 3 of the 1099-DIV, and a transaction breakdown will be found in the supplemental details.
   - Transfers to or from registered accounts (RRSP, TFSA) are deemed dispositions at FMV; model those as SELL + BUY manually.
   - ETF conversion (assuming we treat ETF conversion as a tax-deferred action) must be treated as BUY/SELL with manually calculated amounts that correctly transfer cost basis.
 - Superficial loss rule is user-directed via `superficial_qty`; automatic 30-day window detection is not supported (CRA affiliated-person rules make this impossible to determine from a single account's CSV).
 - No zero-floor handling; over-selling raises a clear error.
 - No FX rate lookup; the user must supply the file.
-- Tracking cash holdings.
 - Transaction notes / comments.
-- Automated holding verification against an input file.
 - Row de-duplication.
 - Only "price" is translated for transactions, not "amount", even though "amount" is typically the more important value and less susceptible to rounding inaccuracy.
 - Potentially inconsistent currency rounding - values may be inaccurate by a few cents.
