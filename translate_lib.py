@@ -1,6 +1,7 @@
 """Core translation logic shared by translate.py and run.py."""
 
 import csv
+import io
 import re
 import sys
 from dataclasses import dataclass, field
@@ -528,6 +529,29 @@ def write_csv(rows, out, columns):
     writer.writeheader()
     for row in rows:
         writer.writerow(row)
+
+
+def load_config_from_text(yaml_text: str, config_name: str = "config") -> "AppConfig":
+    """Parse a YAML string into an AppConfig. Same as load_config but accepts text."""
+    data = yaml.safe_load(yaml_text)
+    if not isinstance(data, dict):
+        raise ConfigurationError(f"{config_name}: mapping config must be a YAML mapping")
+    return AppConfig.from_dict(data, config_name)
+
+
+def load_fx_rates_from_text(csv_text: str) -> dict:
+    """Parse a single Bank of Canada FX CSV string; return {currency: {date: rate_str}}."""
+    rates = {}
+    reader = csv.DictReader(io.StringIO(csv_text))
+    fx_col = next((c for c in (reader.fieldnames or []) if FX_COL_RE.match(c)), None)
+    if fx_col is None:
+        raise FXRateError("no Bank of Canada FX column found (expected a column like FXUSDCAD)")
+    currency = FX_COL_RE.match(fx_col).group(1)
+    currency_rates = rates.setdefault(currency, {})
+    for row in reader:
+        if row["date"] and row[fx_col]:
+            currency_rates[row["date"]] = row[fx_col]
+    return rates
 
 
 def translate_file(input_path, mapping_path, start=None, end=None, fx_rates=None):
