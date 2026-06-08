@@ -6,8 +6,8 @@ column per ticker, in chronological order.
 Input columns (header required, order flexible):
     date           ISO 8601 (YYYY-MM-DD)
     ticker         string (normalized to upper-case)
-    type           START, BUY, or SELL (case-insensitive)
-    quantity       decimal, positive
+    type           START, BUY, SELL, TRANSFER (case-insensitive)
+    quantity       decimal, must be positive for START, BUY, and SELL
     price          per-share price in `currency`, decimal, positive
     currency       OPTIONAL ISO 4217 code (default CAD, case-insensitive)
     exchange_rate  OPTIONAL foreign-currency-to-CAD rate.
@@ -16,21 +16,33 @@ Input columns (header required, order flexible):
     time              OPTIONAL H:MM or HH:MM (e.g. 8:00, 15:30).  Used as a
                       tiebreaker when the same ticker has multiple transactions
                       on the same date.  All transactions in such a group must
-                      have a time, or a warning is shown.
+                      have a time, or a warning is shown. Accuracy is not important;
+                      this is only used for ordering.
     superficial_qty   OPTIONAL decimal >= 0.  Number of shares whose loss is
                       denied under the CRA superficial loss rule (i.e. shares
                       repurchased within 30 days before/after this SELL).
-                      The denied loss is added back to the remaining ACB pool
-                      so it defers into future per-share cost.  Set to 0 to
-                      explicitly confirm no superficial loss and silence the
-                      warning.  Absent: a warning is printed for any SELL that
-                      realizes a loss.  Only valid on SELL rows with a loss.
+                      The denied loss is added back to the remaining ACB pool.
+                      The script prints a warning if this row is absent or empty
+                      on a loss-generating `SELL`. Set to `0` to confirm no superficial
+                      loss and silence the warning.
 
 A START row declares an opening balance for a ticker — `quantity` is the
 shares already held and `price` is their per-share ACB. A ticker may have
 at most one START, and it must come before any BUY/SELL for that ticker
 chronologically (the run errors clearly otherwise). Mathematically a
 START is identical to a BUY at the same per-share price.
+
+A `TRANSFER` row records securities moved between accounts or brokerages.
+Use a positive quantity for a transfer in: `price` is the per-share ACB
+carried over from the source account, which is added to the running ACB pool.
+Use a negative quantity for a transfer out: `price` is ignored and the ACB
+is reduced proportionally (same rule as a `SELL`). No gain or loss is realized
+in either direction. Note that transfers to or from registered tax-free accounts
+are deemed dispositions at fair market value under CRA rules; model
+those as a `SELL` + `BUY` pair instead.
+
+Dividend reinvestments (DRIP) should be recorded as `BUY` rows at the
+reinvestment price.
 
 Output columns: date, ticker, type, quantity, price, currency,
 exchange_rate, amount_cad, acb_cad, gain_loss_cad, superficial_loss_cad
@@ -59,9 +71,8 @@ v1 simplifications (intentional, see plan):
 import argparse
 import sys
 
-from tabulate import tabulate
-
 from acb_lib import compute_acb, load_transactions, write_csv
+from tabulate import tabulate
 
 
 def main():
