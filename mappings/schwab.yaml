@@ -4,32 +4,40 @@ column_map:
   Action: type
   Quantity: quantity
   Price: price
+  Superficial Qty: superficial_qty
   Time: time
+
+optional_columns:
+  - Superficial Qty
+  - Time
 
 type_map:
   Buy: BUY
   Sell: SELL
-  Reinvest Dividend: SELL
   Reinvest Shares: BUY
-  Short Term Cap Gain Reinvest: SELL
   Journaled Shares: BUY
+  Security Transfer: TRANSFER
+
+cash_type_map:
+  quantity_col: Amount
+  types:
+    Cash Dividend: CASH-IN
+    Non-Qualified Div: CASH-IN
+    Credit Interest: CASH-IN
+    Long Term Cap Gain: CASH-IN
+    Short Term Cap Gain Reinvest: CASH-IN
+    Reinvest Dividend: CASH-IN
+    Sell: CASH-IN
+    Buy: CASH-OUT
+    Reinvest Shares: CASH-OUT
+  ticker_fallback_types:
+    Security Transfer: CASH-IN
 
 skip_types:
-  - Journal
-  - Cash Dividend
-  - Non-Qualified Div
-  - Security Transfer
-  - Credit Interest
-  - Long Term Cap Gain
+  - Journal # seem to be no-ops
 
 date_format: "%m/%d/%Y"
 
 defaults:
   currency: USD
-
-settlement_fund_types:
-  types:
-    - Reinvest Dividend
-    - Short Term Cap Gain Reinvest
-  quantity_col: Amount
-  price_override: "1.0"
+  cash_ticker: CASH-USD

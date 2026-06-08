@@ -5,6 +5,12 @@ column_map:
   Shares: quantity
   Share Price: price
   Superficial Qty: superficial_qty
+  Account Number: account_number
+  Time: time
+
+optional_columns:
+  - Superficial Qty
+  - Time
 
 type_map:
   Buy: BUY
@@ -13,13 +19,21 @@ type_map:
   Sweep out: SELL
   Reinvestment: BUY
 
-skip_types:
-  - Dividend
-  - Advisor fee
-  - Withdrawal
+cash_type_map:
+  quantity_col: Net Amount
+  types:
+    Dividend: CASH-IN
+    Advisor fee: CASH-OUT
+    Withdrawal: CASH-OUT
+    Buy: CASH-OUT
+    Sell: CASH-IN
+    Sweep in: CASH-OUT
+    Sweep out: CASH-IN
+    Reinvestment: CASH-OUT
 
 defaults:
   currency: USD
+  cash_ticker: CASH-USD
 
 settlement_fund_types:
   types:

@@ -7,6 +7,11 @@ column_map:
   Currency: currency
   Superficial Qty: superficial_qty
   Account Number: account_number
+  Time: time
+
+optional_columns:
+  - Superficial Qty
+  - Time
 
 type_map:
   Start: START
@@ -17,10 +22,23 @@ type_map:
   Reinvest: BUY
   ETF convert out: SELL
   ETF convert in: BUY
+  Transfer out: TRANSFER
 
-skip_types:
-  - Dividend
-  - Transfer out
+cash_type_map:
+  quantity_col: Amount
+  types:
+    Dividend: CASH-IN
+    Buy: CASH-OUT
+    Sell: CASH-IN
+    Sweep in: CASH-OUT
+    Sweep out: CASH-IN
+    Withdrawal: CASH-OUT
+    ACAT Fee: CASH-OUT
+    Deposit: CASH-IN
+  ticker_fallback_types:
+    Start: CASH-IN
+    Transfer out: CASH-OU
 
 defaults:
   currency: USD
+  cash_ticker: CASH-USD
